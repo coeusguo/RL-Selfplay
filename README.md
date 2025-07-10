@@ -6,9 +6,9 @@ training an agent to play chess  by RL with self-play
 2. MCTS Agent
 3. RL Trainer, Rollout Sampler with Ray
 4. Async. Training
+5. Battle Arena
 
 ## todos
 1. Efficient Policy Models
-2. Battle Arena
-3. PPO baseline
-4. Other Chess games like Go and Othello
+2. PPO baseline
+3. Other Chess games like Go and Othello

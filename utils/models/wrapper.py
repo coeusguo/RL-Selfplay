@@ -1,9 +1,11 @@
 import torch
 import torch.nn as nn
 import numpy as np
+from typing import Tuple
 
 class Wrapper(nn.Module):
     def __init__(self, policy: nn.Module):
+        super().__init__()
         self.policy = policy
 
     def get_policy(self):
@@ -27,3 +29,6 @@ class Wrapper(nn.Module):
         v= v.cpu().numpy()
 
         return probs, v
+
+    def forward(self, *args, **kwargs):
+        return self.policy(*args, **kwargs)

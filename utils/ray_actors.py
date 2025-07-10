@@ -52,15 +52,15 @@ class SelfPlayActor:
 class Trainer:
     def __init__(self, args):
         self.buffer_size = args.sample_buffer_size
-        self.num_epoch = args.num_epoch
+        self.num_mini_epoch = args.num_mini_epoch
         self.batch_size = args.batch_size
         self.sample_buffer = deque()
         
         # initialize policy model
-        self.policy = get_wrapped_policy(args).get_policy
+        self.policy = get_wrapped_policy(args).get_policy()
 
         # initialize optimizer 
-        self.optimizer = get_optimizer(args, self.agent.get_policy_net())
+        self.optimizer = get_optimizer(args, self.policy)
         
         # get loss function
         self.loss_fn = get_loss(args)
@@ -87,7 +87,7 @@ class Trainer:
         
         num_batches = len(all_samples) // self.batch_size
         assert num_batches > 0, f"too few training samples, only {len(all_samples)}"
-        for e in range(self.num_epoch):
+        for e in range(self.num_mini_epoch):
             # shuffle the training sample
             random.shuffle(all_samples)
 
@@ -138,8 +138,6 @@ class Trainer:
         if os.path.exists(ckpt_dir / "optimizer.pth"):
             optimizer_state_dict = torch.load(ckpt_dir / "optimizer.pth")
             self.optimizer.load_state_dict(optimizer_state_dict)
-
-    def get_checkpoint()
 
     def update_train_sample(self, episodes):
         for s in episodes:

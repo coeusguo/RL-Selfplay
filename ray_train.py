@@ -4,8 +4,8 @@ from utils.ray_actors import SelfPlayActor, Trainer
 from collections import deque
 
 def train(args):
-    rollout_actor = SelfPlayActor(args)
-    trainer = Trainer(args) 
+    rollout_actor = SelfPlayActor.remote(args)
+    trainer = Trainer.remote(args) 
 
     # deploy ray actors
     ray.get([rollout_actor.ready.remote(), trainer.ready.remote()])
@@ -60,6 +60,9 @@ def train(args):
                     trainer.update_train_sample.remote(samples)
 
             train_ref = trainer.train_one_epoch.remote()
+
+        if epoch > args.main_epoch:
+            break
             
 if __name__ == "__main__":
     args = parse_args()

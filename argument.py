@@ -12,13 +12,15 @@ def parse_args():
                         help="the number of pieces in a row to win the game")
 
     # training related
+    parser.add_argument("-main-epoch", type=int, default=100)
+    parser.add_argument("-num-mini-epoch", type=int, default=10, 
+                        help="for each epoch, the samples will trained for num-mini-epochs")
     parser.add_argument("-loss-fn", type=str, default="imatation")
     parser.add_argument("-lr", type=float, default=5e-4)
     parser.add_argument("-weight-decay", type=float, default=0.1)
     parser.add_argument("-dropout", type=float, default=0.0)
     parser.add_argument("-train-buffer-size", type=int, default=15)
     parser.add_argument("-optimizer", type=str, default="adamw")
-    parser.add_argument("-num-epochs", type=int, default=10)
     parser.add_argument("-batch-size", type=int, default=64)
     parser.add_argument("-eval-every", type=int, default=2, help="how many epochs per evluate")
     parser.add_argument("-update-threhold", type=float, default=0.55,
@@ -27,6 +29,9 @@ def parse_args():
     parser.add_argument("-data-buffer-size", type=int, default=100, 
                     help="the total number of rollout samples buffered to train the policy model")
 
+    # ray related
+    parser.add_argument("-sample-buffer-size", type=int, default=5, 
+                    help="maximum number of rollout refs to store in the buffer")
 
     # self play related
     parser.add_argument("-temperature", type=float, default=1.0)
@@ -37,8 +42,13 @@ def parse_args():
     parser.add_argument("-rollout-buffer-size", type=int, default=5, 
                         help="during aync. training, the maximum buffer size to store the rollout samples")
 
+    # mcts related
+    parser.add_argument("-puct-factor", type=float, default=1.0)
+    parser.add_argument("-num-tree-search", type=int, default=10, 
+                         help="the number of tree searches per prediction")
+
     # policy model related
-    parser.add_argument("-model", type=str, defaul="naive")
+    parser.add_argument("-model", type=str, default="naive")
     parser.add_argument("-agent", type=str, default="mcts")
 
     # logging

@@ -13,17 +13,17 @@ class MCTS:
         self.num_tree_search = args.num_tree_search
         
         # frequency N(s) and N(s, a)
-        self.N_s = defaultdict(0)
-        self.N_sa = defaultdict(0)
+        self.N_s = defaultdict(int)
+        self.N_sa = defaultdict(int)
 
         # Q(s, a)
-        self.Q_sa = defaultdict(0)
+        self.Q_sa = defaultdict(float)
         
         # pi(s, *):
         self.pi_s = defaultdict(None)
 
         # valide moves at state s
-        self.valid_move_s = defaultdict(0)
+        self.valid_move_s = defaultdict(int)
 
         # store the terminal rewards if s is terminal state
         self.terminal_reward = defaultdict(None)
@@ -59,7 +59,7 @@ class MCTS:
         if self.terminal_reward[s] is not None:
             return self.terminal_reward[s]
 
-        if self.pi_s[s] is None: # not visited before, take as leaf node
+        if not s in self.pi_s: # not visited before, take as leaf node
             # get predicted policy (pi) and state value (v)
             pi, v = self.policy(s)
 
@@ -123,7 +123,7 @@ class MCTS:
 
         # perform tree search
         for _ in range(self.num_tree_search):
-            self.search(canonical_board)
+            self.tree_search(canonical_board)
 
         valid_moves = self.valid_move_s[s]
         visting_freq = np.zeros_like(valid_moves)
@@ -158,6 +158,7 @@ class MCTSAgent:
         self.game = game
         self.policy = policy
         self.mcts = MCTS(args, game, policy)
+        self.temperature = args.temperature
 
         self.decay_step = args.temp_decay_step
         self.decay_rate = args.temp_decay_rate
@@ -178,8 +179,8 @@ class MCTSAgent:
             canonical_board = self.game.get_canonical_form(board, player_id)
 
             # decay the temperature if needed
-            if step >= self.temp_decay_step:
-                temp = temp * self.temp_decay_rate
+            if step >= self.decay_step:
+                temp = temp * self.decay_rate
 
             pi = self.mcts.action_probs(canonical_board, temperature=temp)
 

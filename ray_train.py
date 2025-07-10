@@ -11,8 +11,8 @@ def train(args):
     ray.get([rollout_actor.ready.remote(), trainer.ready.remote()])
 
     # sync initial model weights
-    ray.get(trainer.save_checkpoint.remote(args.log_dir))
-    ray.get(rollout_actor.load_checkpoint.remote(args.log_dir))
+    state_dict = ray.get(trainer.get_checkpoint.remote())
+    rollout_actor.load_checkpoint.remote(state_dict)
 
     # rollout buffer
     rollout_buffer = deque()
@@ -38,11 +38,18 @@ def train(args):
             epoch += 1
             
             # check evaluate condition
-            if epoch % args.eval_every:
-                # evaluate, todo
-                pass
+            if epoch % args.eval_every == 0:
+                # evaluate
+                old_state_dict = ray.get(rollout_actor.get_checkpoint.remote())
+                win_rate = ray.get(trainer.dual.remote(old_state_dict))
 
                 # update rollout policy if win rate reaches threshold
+                if win_rate > args.update_threshold:
+                    state_dict = ray.get(trainer.get_checkpoint.remote())
+                    rollout_actor.load_checkpoint(state_dict)
+
+            if epoch % args.save_every == 0:
+                trainer.save_checkpoint.remote(args.log_dir)
 
             # update training buffer
             if len(rollout_buffer) > 0:

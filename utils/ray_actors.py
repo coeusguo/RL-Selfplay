@@ -4,7 +4,7 @@ import torch
 import random
 import numpy as np
 from tqdm import tqdm
-from collections import deque
+from collections import deque, OrderedDict
 from typing import Literal, Tuple
 from pathlib import Path, PosixPath
 from .optimizer import get_optimizer
@@ -12,6 +12,7 @@ from .models import get_wrapped_policy
 from .losses import get_loss
 from .games import get_game
 from .agents import get_agent
+from  .games.arena import Arena
 
 @ray.remote(num_gpus=1)
 class SelfPlayActor:
@@ -40,17 +41,12 @@ class SelfPlayActor:
         
         return samples
         
-    def load_checkpoint(self, ckpt_dir: str | PosixPath):
-        '''
-        self play actor and trainer are pairs, must be created together
-        should call Traininer.save_chekpoint before calling this function
-        '''
-        ckpt_dir = Path(ckpt_dir)
-        assert os.path.isdir(ckpt_dir), f"{ckpt_dir} not found"
-
-        state_dict = torch.load(ckpt_dir / "temp.pth")
+    def load_checkpoint(self, state_dict: OrderedDict):
         self.policy.load_state_dict(state_dict)
-    
+
+    def get_checkpoint(self):
+        return self.policy.state_dict()
+
 
 @ray.remote(num_gpus=1)
 class Trainer:
@@ -112,23 +108,28 @@ class Trainer:
                 loss.backward()
                 self.optimizer.step()
 
-    def save_checkpoint(self, save_dir: str | PosixPath, load_by_rollout: bool = True):
+                progress_bar.step()
+
+    def save_checkpoint(self, save_dir: PosixPath | str):
+
+        state_dict = self.policy.state_dict()
         save_dir = Path(save_dir)
         os.mkdir(save_dir, exist_ok=True)
-        state_dict = self.policy.state_dict()
-        if load_by_rollout:
-            # ckpt will be used to update rollout actor
-            torch.save(state_dict, save_dir / "temp.pth")
-        else:
-            # could be used to resume training
-            torch.save(state_dict, save_dir / "policy.pth")
-            torch.save(self.optimizer.state_dict, save_dir / "optimizer.pth")
+
+        # could be used to resume training
+        torch.save(state_dict, save_dir / "policy.pth")
+        torch.save(self.optimizer.state_dict, save_dir / "optimizer.pth")
+
+        return state_dict
+    
+    def get_checkpoint(self):
+        return self.policy.state_dict()
 
     def load_checkpoint(self, ckpt_dir: str | PosixPath):
         '''
         this function is only used for resume training
         '''
-        assert os.path.isdir(ckpt_path), f"{ckpt_path} does not exist"
+        assert os.path.isdir(ckpt_dir), f"{ckpt_dir} does not exist"
         ckpt_dir = Path(ckpt_dir)
         policy_state_dict = torch.load(ckpt_dir / "policy.pth")
         self.policy.load_state_dict(policy_state_dict)
@@ -138,8 +139,30 @@ class Trainer:
             optimizer_state_dict = torch.load(ckpt_dir / "optimizer.pth")
             self.optimizer.load_state_dict(optimizer_state_dict)
 
+    def get_checkpoint()
+
     def update_train_sample(self, episodes):
         for s in episodes:
             if len(self.sample_buffer) > self.buffer_size:
                 self.sample_buffer.popleft()
             self.sample_buffer.append(s)
+
+    def dual(self, old_policy_ckpt: OrderedDict):
+        game = get_game(self.args)
+
+        old_policy = get_wrapped_policy(self.args)
+        old_policy.load_state_dict(old_policy_ckpt)
+        old_agent = get_agent(self.args, old_policy, game)
+
+        new_agent = get_agent(self.args, self.policy, game)
+
+        num_win, num_lose, num_draw = Arena.match(
+            new_agent.mcts,
+            old_agent.mcts,
+            game,
+            num_match=100
+        )
+
+        none_draw_win_rate = num_win / (num_win + num_lose)
+
+        return none_draw_win_rate

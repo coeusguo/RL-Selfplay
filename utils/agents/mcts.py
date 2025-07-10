@@ -162,9 +162,6 @@ class MCTSAgent:
         self.decay_step = args.temp_decay_step
         self.decay_rate = args.temp_decay_rate
 
-    def get_policy_net(self):
-        return self.policy
-
     def run_one_episode(self) -> list[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
         
         step = 0

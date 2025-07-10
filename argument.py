@@ -43,10 +43,11 @@ def parse_args():
 
     # logging
     parser.add_argument("-log-dir", type=str, default="log")
+    parser.add_argument("-save-every", type=int, default=10, help="how many epochs per evluate")
 
     args = parser.parse_args()
 
     # make unique log dir by time
-    args.log_dir = Path(args.log_dir) / f"{args.agent}_{game}_{datetime.datetime.now()}".replace(" ", "-")
+    args.log_dir = Path(args.log_dir) / f"{args.agent}_{args.game}_{datetime.datetime.now()}".replace(" ", "-")
 
     return args

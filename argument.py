@@ -44,7 +44,7 @@ def parse_args():
 
     # mcts related
     parser.add_argument("-puct-factor", type=float, default=1.0)
-    parser.add_argument("-num-tree-search", type=int, default=10, 
+    parser.add_argument("-num-tree-search", type=int, default=50, 
                          help="the number of tree searches per prediction")
 
     # policy model related

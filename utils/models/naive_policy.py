@@ -15,18 +15,18 @@ class ResidualBlock(nn.Module):
         self.bn2 = nn.BatchNorm2d(out_channel)
 
     def forward(self, x):
-        out = F.relu(self.bn1(self.self.conv1(x)))
+        out = F.relu(self.bn1(self.conv1(x)))
         out = F.relu(self.bn2(self.conv2(out)))
         return out + x
 
 class NaivePolicyNet(nn.Module):
     def __init__(self, args, action_size):
-       
+        super(NaivePolicyNet, self).__init__()
+
         self.board_size = args.board_size
         self.action_size = action_size
         self.dropout = args.dropout
-
-        super(NaivePolicyNet, self).__init__()
+        
         self.conv1 = nn.Conv2d(1, NUM_CHANNELS, 3, stride=1, padding=1)
  
         self.block = nn.Sequential(

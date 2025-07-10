@@ -15,9 +15,10 @@ class Wrapper(nn.Module):
         self.policy.load_state_dict(*args, **kwargs)
 
     def predict(self, board: np.ndarray)-> Tuple[np.ndarray, np.ndarray]:
-
-        board = torch.FloatTensor(board, dtype=torch.float32)
-        board = board.view(1, self.board_x, self.board_y)
+        
+        n, _ = board.shape
+        board = torch.from_numpy(board).float()
+        board = board.view(1, 1, n, n) # (B, C, H, W)
         device = next(self.policy.parameters()).device
         board = board.to(device)
 
@@ -25,9 +26,10 @@ class Wrapper(nn.Module):
         with torch.no_grad():
             pi, v = self.policy(board)
 
+        pi, v = pi.view(-1), v.view(-1)
         probs = torch.exp(pi).cpu().numpy()
         v= v.cpu().numpy()
-
+        
         return probs, v
 
     def forward(self, *args, **kwargs):

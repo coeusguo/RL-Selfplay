@@ -65,13 +65,13 @@ class GomokuGame:
         b = Board(self.n, board)
 
         # 1-D action to 2-D action
-        move = (int(action_id / self.n), action % self.n)
+        move = (int(action_id / self.n), action_id % self.n)
         b.execute_move(move, player_id)
 
         # return next_state and opponent's id
         return (b.pieces, -player_id)
 
-    def get_valid_moves(self, board: np.ndarray, player: int) -> np.ndarray:
+    def get_valid_moves(self, board: np.ndarray) -> np.ndarray:
         
         valid_moves = np.zeros_like(board)
 
@@ -126,7 +126,7 @@ class GomokuGame:
 
             # Check diagonal (top-right to bottom-left) win
             if row + self.num_in_a_row <= self.n and col >= self.num_in_a_row:
-                left_diag_pieces = board[np.arange(row, row + self.num_in_a_row), np.arange(col, col - self.num_in_a_row)]
+                left_diag_pieces = board[np.arange(row, row + self.num_in_a_row), np.arange(col - self.num_in_a_row, col)[::-1]]
                 reward = is_win(left_diag_pieces)
 
             if not reward == 0:

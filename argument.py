@@ -24,6 +24,8 @@ def parse_args():
     parser.add_argument("-update-threhold", type=float, default=0.55,
                         help="when to update the rollout polcy? depends on the winning rate of new_policy"
                         "against the old polcy (default: 0.6, i.e. 55% winning rate)")
+    parser.add_argument("-data-buffer-size", type=int, default=100, 
+                    help="the total number of rollout samples buffered to train the policy model")
 
 
     # self play related

@@ -5,7 +5,7 @@ import random
 import numpy as np
 from tqdm import tqdm
 from collections import deque
-from typing import Literal
+from typing import Literal, Tuple
 from pathlib import Path, PosixPath
 from .optimizer import get_optimizer
 from .models import get_wrapped_policy
@@ -30,12 +30,13 @@ class SelfPlayActor:
     def ready(self):
         return True
 
-    def generate_samples(self,
-        num_episodes: int = 1
-    ) -> list[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
-        samples = []
-        for _ in range(num_episodes):
-            samples.extend(self.agent.run_one_episode())
+    def generate_samples(self, num_episodes: int = 1 
+                         ) -> list[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+        samples = self.agent.run_one_episode()
+        if num_episodes > 1:
+            samples = [samples]
+            for _ in range(1, num_episodes):
+                samples.append(self.agent.run_one_episode())
         
         return samples
         
@@ -138,7 +139,7 @@ class Trainer:
             self.optimizer.load_state_dict(optimizer_state_dict)
 
     def update_train_sample(self, episodes):
-        for s in samples:
+        for s in episodes:
             if len(self.sample_buffer) > self.buffer_size:
                 self.sample_buffer.popleft()
             self.sample_buffer.append(s)

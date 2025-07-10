@@ -2,6 +2,7 @@
 import math
 import random
 import numpy as np
+from typing import Tuple
 from collections import defaultdict
 
 class MCTS:
@@ -27,7 +28,7 @@ class MCTS:
         # store the terminal rewards if s is terminal state
         self.terminal_reward = defaultdict(None)
 
-    def clean_search_tree(self):
+    def clear_search_tree(self):
         self.N_s.clear()
         self.N_sa.clear()
         self.Q_sa.clear()
@@ -169,6 +170,7 @@ class MCTSAgent:
         step = 0
         raw_samples = []
         board = self.game.get_empty_board()
+        self.mcts.clear_search_tree()
 
         player_id = 1
         init_player_id = player_id
@@ -219,9 +221,9 @@ class MCTSAgent:
         for sample_group in raw_samples:
             groups, player_id = sample_group
             board, pi = zip(*groups)
-            group_rewards = np.array(rewards * player_id)
+            group_rewards = np.array(reward * player_id)
             group_rewards = [r for _ in range(len(board))]
 
             samples.extend(list(zip(board, pi, group_rewards)))
 
-    return samples
+        return samples

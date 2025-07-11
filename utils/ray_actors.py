@@ -12,7 +12,7 @@ from .models import get_wrapped_policy
 from .losses import get_loss
 from .games import get_game
 from .agents import get_agent
-from  .games.arena import Arena
+from .games.arena import Arena
 
 @ray.remote(num_gpus=1)
 class SelfPlayActor:
@@ -28,21 +28,19 @@ class SelfPlayActor:
         os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, gpu_ids))
         self.device = torch.device("cuda:0")
 
+        self.policy.to(self.device)
+
     def ready(self):
         return True
 
-    def generate_samples(self, num_episodes: int = 1 
-                         ) -> list[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
-        samples = self.agent.run_one_episode()
-        if num_episodes > 1:
-            samples = [samples]
-            for _ in range(1, num_episodes):
-                samples.append(self.agent.run_one_episode())
-        
-        return samples
+    def generate_one_episode(self) -> list[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+        return self.agent.run_one_episode()
         
     def load_checkpoint(self, state_dict: OrderedDict):
         self.policy.load_state_dict(state_dict)
+
+        # the policy has been updated, should clean old buffers (if any)
+        self.agent.init_buffer()
 
     def get_checkpoint(self):
         return self.policy.state_dict()
@@ -51,16 +49,18 @@ class SelfPlayActor:
 @ray.remote(num_gpus=1)
 class Trainer:
     def __init__(self, args):
-        self.buffer_size = args.sample_buffer_size
+        self.args = args
+        
+        self.buffer_size = args.trainer_data_buffer_size
         self.num_mini_epoch = args.num_mini_epoch
         self.batch_size = args.batch_size
         self.sample_buffer = deque()
         
         # initialize policy model
-        self.policy = get_wrapped_policy(args).get_policy()
+        self.policy = get_wrapped_policy(args)
 
         # initialize optimizer 
-        self.optimizer = get_optimizer(args, self.policy)
+        self.optimizer = get_optimizer(args, self.policy.get_policy())
         
         # get loss function
         self.loss_fn = get_loss(args)
@@ -69,6 +69,8 @@ class Trainer:
         gpu_ids = ray.get_gpu_ids()
         os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, gpu_ids))
         self.device = torch.device("cuda:0")
+
+        self.policy.to(self.device)
         
     def ready(self):
         return True
@@ -80,41 +82,42 @@ class Trainer:
             array = np.array(array)
             array = torch.tensor(array, dtype=torch.float32)
             return array.to(self.device)
-
+        
         all_samples = []
         for episode in self.sample_buffer:
             all_samples.extend(episode)
-        
+
         num_batches = len(all_samples) // self.batch_size
         assert num_batches > 0, f"too few training samples, only {len(all_samples)}"
+
+        total_loss = 0
         for e in range(self.num_mini_epoch):
             # shuffle the training sample
             random.shuffle(all_samples)
 
-            progress_bar = tqdm(num_batches, desc=f"Training policy net, epoch[{e}/{self.num_epoch}]")
             for idx in range(num_batches):
                 start_idx = idx * self.batch_size
                 end_idx = (idx + 1) * self.batch_size
 
                 boards, target_pi, target_v = list(zip(*all_samples[start_idx: end_idx]))
-                boards, pi, v = np_to_tensor(boards), np_to_tensor(pi), np_to_tensor(v)
+                boards, target_pi, target_v = np_to_tensor(boards), np_to_tensor(target_pi), np_to_tensor(target_v)
 
-                pi, v = self.policy(boards)
-                loss = self.loss_fn(pi, v, target_pi, target_v)
+                log_pi, v = self.policy(boards)
+                loss = self.loss_fn(log_pi, v, target_pi, target_v)
 
-                progress_bar.set_postfix(loss=loss.detach().cpu().item())
+                total_loss += loss.detach().cpu().item()
 
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
 
-                progress_bar.step()
+        return total_loss / e / num_batches
 
     def save_checkpoint(self, save_dir: PosixPath | str):
 
         state_dict = self.policy.state_dict()
         save_dir = Path(save_dir)
-        os.mkdir(save_dir, exist_ok=True)
+        os.makedirs(save_dir, exist_ok=True)
 
         # could be used to resume training
         torch.save(state_dict, save_dir / "policy.pth")
@@ -139,11 +142,10 @@ class Trainer:
             optimizer_state_dict = torch.load(ckpt_dir / "optimizer.pth")
             self.optimizer.load_state_dict(optimizer_state_dict)
 
-    def update_train_sample(self, episodes):
-        for s in episodes:
-            if len(self.sample_buffer) > self.buffer_size:
-                self.sample_buffer.popleft()
-            self.sample_buffer.append(s)
+    def update_train_sample(self, episode: list[Tuple[np.ndarray, np.ndarray, np.ndarray]]):
+        if len(self.sample_buffer) > self.buffer_size:
+            self.sample_buffer.popleft()
+        self.sample_buffer.append(episode)
 
     def dual(self, old_policy_ckpt: OrderedDict):
         game = get_game(self.args)
@@ -154,12 +156,25 @@ class Trainer:
 
         new_agent = get_agent(self.args, self.policy, game)
 
-        num_win, num_lose, num_draw = Arena.match(
+        num_win, num_lose, num_draw, raw_samples = Arena.multiple_matches(
             new_agent.mcts,
             old_agent.mcts,
             game,
-            num_match=100
+            num_match=25,
+            use_tqdm=False,
+            keep_samples=True
         )
+
+        '''
+            reuse the match samples for training
+            raw_samples: [
+                [
+                    (board, action, player_id), (board, action, player_id), ...
+                ],
+                ...
+            ]
+        '''
+        raw_samples
 
         none_draw_win_rate = num_win / (num_win + num_lose)
 

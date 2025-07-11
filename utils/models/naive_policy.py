@@ -41,14 +41,13 @@ class NaivePolicyNet(nn.Module):
 
     def forward(self, s):
         B = s.size(0)
-
         out = self.conv1(s)
         out = self.block(out)
 
         out = self.gap(out).reshape(B, NUM_CHANNELS)
 
         pi_logits = self.pi_fc(out)
-        v_logits = self.v_fc(out)
+        v_logits = self.v_fc(out).view(B) # reshape (B, 1) to (B, )
 
         return F.log_softmax(pi_logits, dim=-1), torch.tanh(v_logits)
     

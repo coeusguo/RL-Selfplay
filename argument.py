@@ -23,14 +23,14 @@ def parse_args():
     parser.add_argument("-optimizer", type=str, default="adamw")
     parser.add_argument("-batch-size", type=int, default=64)
     parser.add_argument("-eval-every", type=int, default=2, help="how many epochs per evluate")
-    parser.add_argument("-update-threhold", type=float, default=0.55,
+    parser.add_argument("-update-threshold", type=float, default=0.55,
                         help="when to update the rollout polcy? depends on the winning rate of new_policy"
                         "against the old polcy (default: 0.6, i.e. 55% winning rate)")
-    parser.add_argument("-data-buffer-size", type=int, default=100, 
+    parser.add_argument("-trainer-data-buffer-size", type=int, default=100, 
                     help="the total number of rollout samples buffered to train the policy model")
 
     # ray related
-    parser.add_argument("-sample-buffer-size", type=int, default=5, 
+    parser.add_argument("-rollout-sample-buffer-size", type=int, default=5, 
                     help="maximum number of rollout refs to store in the buffer")
 
     # self play related

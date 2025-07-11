@@ -1,9 +1,12 @@
 
 import math
 import random
+import torch
 import numpy as np
+import torch.nn.functional as F
 from typing import Tuple
 from collections import defaultdict
+from .base import Agent
 
 class MCTS:
     def __init__(self, args, game, policy):
@@ -108,7 +111,7 @@ class MCTS:
         # update Q(s, a)
         s_opponent = self.game.get_canonical_form(s_opponent, opponent_id)
         self.Q_sa[(s, best_action)] = (self.Q_sa[(s, best_action)] * self.N_s[s] - opponent_v) / \
-                                      (self.N_sa[(s, best_action)] + 1)
+                                      (self.N_s[s] + 1)
 
         # increment N(s) and N(s, a) by 1
         self.N_s[s] += 1
@@ -147,12 +150,12 @@ class MCTS:
 
         else:
             # smooth out the probs by temperature
-            visting_freq = visting_freq ** (1 / temperature)
+            visting_freq = (visting_freq) ** (1 / temperature)
             probs = visting_freq / np.sum(visting_freq)
         return probs
     
 
-class MCTSAgent:
+class MCTSAgent(Agent):
     def __init__(self, args, policy, game):
         self.game = game
         self.policy = policy
@@ -162,19 +165,24 @@ class MCTSAgent:
         self.decay_step = args.temp_decay_step
         self.decay_rate = args.temp_decay_rate
 
-    def run_one_episode(self) -> list[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
-        
-        step = 0
-        raw_samples = []
-        board = self.game.get_empty_board()
+        # 
+
+    def init_buffer(self):
         self.mcts.clear_search_tree()
+
+    def run_one_episode(self) -> list[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
         self.policy.eval()
 
+        # sample buffers
+        raw_canonical_boards = []
+        action_ids = []
+        
         player_id = 1
         init_player_id = player_id
-        
+        board = self.game.get_empty_board()
         temp = self.temperature
         decayed = False
+        step = 0
         while True:
             step += 1
             canonical_board = self.game.get_canonical_form(board, player_id)
@@ -186,13 +194,12 @@ class MCTSAgent:
 
             pi = self.mcts.action_probs(canonical_board, temperature=temp)
 
-            # do some data augmentation before adding to samples
-            augmented_samples = self.game.get_symmetries(board, pi)
-            raw_samples.append((augmented_samples, player_id))
-
             # randomly sample an action from categorical distribution
+            action_id = np.random.choice(np.arange(len(pi)), p=pi).item()
 
-            action_id = np.random.choice(np.arange(len(pi)), p=pi)
+            # save samples
+            raw_canonical_boards.append(canonical_board)
+            action_ids.append(action_id)
 
             # get updated board and opponent's id
             board, player_id = self.game.get_next_state(board, player_id, action_id)
@@ -202,7 +209,23 @@ class MCTSAgent:
             if reward is not None:
                 break
 
+        # do some data augmentation
+        canonical_boards = np.stack(raw_canonical_boards) # (B, N, N)
+        canonical_boards = torch.from_numpy(canonical_boards).cuda()
+        
+        onehot_actions = F.one_hot(torch.tensor(action_ids),\
+                        num_classes=self.game.get_action_size()).cuda() # (B, N*N)
+        augmented_samples = self.game.get_symmetries(canonical_boards, onehot_actions)
+
+        return self.wrap_up_samples(raw_samples, reward)
+
+    def wrap_up_samples(self, raw_samples, reward, first_player = 1):
+
         '''
+        raw_samples: [
+            (boards_1, action_ids_1), ..., (boards_8, action_ids_8)
+        ]
+
         post process samples,
         case:
             - reward = 1, user win, opponent lose
@@ -217,13 +240,28 @@ class MCTSAgent:
 
             reward = reward * player_id
         '''
+        assert isinstance(raw_samples, list)
+
+        def tensor_to_numpy(board, pi):
+            if isinstance(board, torch.Tensor):
+                board = board.cpu().numpy()
+                pi = pi.cpu().numpy()
+            
+            # (B, n, n) to a list of B (n, n) np arrays
+            return list(board), list(pi)
+
+        num_steps = raw_samples[0].shape[0]
+
+        player_ids = np.ones(num_steps, dtype=np.int64) * first_player
+        player_ids[1::2] *= -1
+        group_rewards = reward * player_ids
 
         samples = []
         for sample_group in raw_samples:
-            groups, player_id = sample_group
-            board, pi = zip(*groups)
-            group_rewards = np.array(reward * player_id)
-            group_rewards = [group_rewards for _ in range(len(board))]
+            board, pi = sample_group
+            
+
+            
 
             samples.extend(list(zip(board, pi, group_rewards)))
 

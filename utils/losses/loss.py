@@ -1,9 +1,9 @@
 import torch
 
-def cross_entropy_loss(predict, target):
+def cross_entropy_loss(log_pi, target_pi):
     # size: (B, A)
-    assert predict.size() == target.size()
-    loss = -torch.sum(target * predict, dim=-1, keepdim=False)
+    assert log_pi.size() == target_pi.size()
+    loss = -torch.sum(target_pi * log_pi, dim=-1, keepdim=False)
     return torch.mean(loss)
 
 def mse_loss(predict, target):

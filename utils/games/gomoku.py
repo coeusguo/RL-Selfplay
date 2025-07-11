@@ -1,5 +1,6 @@
 import numpy as np
 from typing import Literal, Tuple
+from .base import BoardGame
 
 class Board():
     '''
@@ -29,7 +30,7 @@ class Board():
         self.pieces[row, col] = color
 
 
-class GomokuGame:
+class GomokuGame(BoardGame):
     idx_to_piece = {
         -1: "X",
         +0: "-",
@@ -86,7 +87,7 @@ class GomokuGame:
         # reshape to 1-D
         return valid_moves.reshape(-1)
 
-    def is_terminal(self, board, player):
+    def is_terminal(self, board, player: Literal[-1, 1]):
         '''
         check if any of the players wins,
         return None if not ended, 1 if player won, -1 if player lost, 0 if draw.
@@ -113,24 +114,25 @@ class GomokuGame:
             if col + self.num_in_a_row <= self.n:
                 horizontal_pieces = board[row, col: col + self.num_in_a_row]
                 reward = is_win(horizontal_pieces)
+                if not reward == 0: break
 
             # Check vertical win
             if row + self.num_in_a_row <= self.n:
                 vertical_pieces = board[row: row + self.num_in_a_row, col]
                 reward = is_win(vertical_pieces)
+                if not reward == 0: break
 
             # Check diagonal (top-left to bottom-right) win
             if row + self.num_in_a_row <= self.n and col + self.num_in_a_row <= self.n:
                 right_diag_pieces = board[np.arange(row, row + self.num_in_a_row), np.arange(col, col + self.num_in_a_row)]
                 reward = is_win(right_diag_pieces)
+                if not reward == 0: break
 
             # Check diagonal (top-right to bottom-left) win
             if row + self.num_in_a_row <= self.n and col >= self.num_in_a_row:
                 left_diag_pieces = board[np.arange(row, row + self.num_in_a_row), np.arange(col - self.num_in_a_row, col)[::-1]]
                 reward = is_win(left_diag_pieces)
-
-            if not reward == 0:
-                break
+                if not reward == 0: break
 
         if reward == 0:
             # check if the board is full
@@ -141,38 +143,11 @@ class GomokuGame:
 
         return reward
 
-    def get_canonical_form(self, 
-            board: np.ndarray, 
-            player: Literal[1, -1]
-        ) -> np.ndarray:
-        '''
-        may need to revert 1 and -1 as oppenent's view (player = -1)
-        '''
-        return player * board
+    def get_readable_board(self, board):
+        cache = []
+        for row in range(board.shape[0]):
+            for col in range(board.shape[1]):
+                cache.append(self.idx_to_piece[board[row, col]])
+            cache.append("\n")
+        return " " + " ".join(cache)
 
-    def get_symmetries(self, 
-            board: np.ndarray, 
-            pi: np.ndarray
-        ) -> list[Tuple[np.ndarray, np.ndarray]]:
-        '''
-        this method is used for data augmentation
-        number of possible rotation: {0, 90, 180, 270} degrees
-        flip or not resulting in 2 possible states
-
-        in total: 4 x 2 = 8 symmetrical board states and actions
-        '''
-        # convert 1-D pi into 2-D 
-        pi = pi.reshape(self.n, self.n)
-
-        augmented = []
-        for num_degree in range(0, 4):
-            rotated_board = np.rot90(board, num_degree)
-            rotated_pi = np.rot90(pi, num_degree)
-            augmented.append((rotated_board, rotated_pi.reshape(-1)))
-
-            # also add flipped board and action
-            flipped_board = np.fliplr(rotated_board)
-            flipped_pi = np.fliplr(rotated_pi)
-            augmented.append((flipped_board, flipped_pi.reshape(-1)))
-
-        return augmented

@@ -1,3 +1,4 @@
 push.sh
 pull.sh
 __pycache__/
+log/

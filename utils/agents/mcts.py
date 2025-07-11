@@ -254,15 +254,13 @@ class MCTSAgent(Agent):
 
         player_ids = np.ones(num_steps, dtype=np.int64) * first_player
         player_ids[1::2] *= -1
-        group_rewards = reward * player_ids
+        group_rewards = list(reward * player_ids)
 
         samples = []
         for sample_group in raw_samples:
-            board, pi = sample_group
-            
-
+            board, pi = tensor_to_numpy(*sample_group)
             
 
             samples.extend(list(zip(board, pi, group_rewards)))
-
+            
         return samples

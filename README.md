@@ -3,7 +3,7 @@ training an agent to play chess  by RL with self-play
 
 ``sh script/train.sh`` to start the training, requires two GPUs
 
-It will take a few days to train a 10 x 10 Gomoku (i.e. five-in-a-row) Agent with 2 RTX 2060 GPUs
+It will take less than one days to train a 10 x 10 Gomoku (i.e. five-in-a-row) Agent with 2 RTX 2060 GPUs
 
 
 ## done

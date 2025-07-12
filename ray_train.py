@@ -30,7 +30,8 @@ def train(args):
 
     epoch = 0
     # generate warm up examples
-    progress_bar = tqdm(range(args.main_epoch), "Self-Play Training")
+    progress_bar = tqdm(range(args.main_epoch), desc="Self-Play Training", position=0)
+    num_rollout_policy_update = 0
     while True:
         # genererate new samples if needed
         if len(rollout_buffer) < rollout_buffer_size:
@@ -48,10 +49,41 @@ def train(args):
             if epoch % args.eval_every == 0:
                 # evaluate
                 old_state_dict = ray.get(rollout_actor.get_checkpoint.remote())
-                win_rate = ray.get(trainer.dual.remote(old_state_dict))
+                match_refs = [trainer.match_one_round.remote(old_state_dict)]
+                if args.num_eval_matches == 1:
+                    match_refs = [trainer.match_one_round.remote(old_state_dict, clear_cache_after_eval=True)]
+                elif args.num_eval_matches == 2:
+                    match_refs = [
+                        trainer.match_one_round.remote(old_state_dict),
+                        trainer.match_one_round.remote(clear_cache_after_eval=True)
+                        ]
+                else:
+                    match_refs = [trainer.match_one_round.remote(old_state_dict)] + \
+                                 [trainer.match_one_round.remote() for _ in range(args.num_eval_matches - 2)] + \
+                                 [trainer.match_one_round.remote(clear_cache_after_eval=True)] 
+                
+                eval_pb = tqdm(range(len(match_refs)), 
+                               desc=f"Evaluation (old model: Gen {num_rollout_policy_update})", 
+                               position=1, leave=False)
+                total_win = total_lose = total_draw = total_matches = 0
+                for idx in eval_pb:
+                    num_win, num_lose, num_draw = ray.get(match_refs[idx])
+                    total_win += num_win
+                    total_lose += num_lose
+                    total_draw += num_draw
+                    total_matches += (num_win + num_lose + num_draw)
+                    eval_pb.set_postfix(
+                        draw_rate=f"{total_draw / total_matches * 100:.2f}%",
+                        lose_rate=f"{total_lose / total_matches * 100:.2f}%",
+                        win_rate=f"{total_win / total_matches * 100:.2f}%"
+                        )
+
+                win_rate = total_win / (total_win + total_lose)
 
                 # update rollout policy if win rate reaches threshold
                 if win_rate > args.update_threshold:
+
+                    num_rollout_policy_update += 1
                     state_dict = ray.get(trainer.get_checkpoint.remote())
                     rollout_actor.load_checkpoint.remote(state_dict)
 

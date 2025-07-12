@@ -41,6 +41,8 @@ def parse_args():
                         help="temperature decay by a factor of given rate (0.0 for deterministic sampling)")
     parser.add_argument("-rollout-buffer-size", type=int, default=5, 
                         help="during aync. training, the maximum buffer size to store the rollout samples")
+    parser.add_argument("-num-eval-matches", type=int, default=12, 
+                        help="number of matches during evaluation")
 
     # mcts related
     parser.add_argument("-puct-factor", type=float, default=1.0)
@@ -58,6 +60,7 @@ def parse_args():
     args = parser.parse_args()
 
     # make unique log dir by time
-    args.log_dir = Path(args.log_dir) / f"{args.agent}_{args.game}_{datetime.datetime.now()}".replace(" ", "-")
+    args.log_dir = Path(args.log_dir) / \
+        f"{args.agent}_{args.game}_{args.board_size}x{args.board_size}_{datetime.datetime.now()}".replace(" ", "-")
 
     return args

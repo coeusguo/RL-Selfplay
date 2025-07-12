@@ -176,7 +176,7 @@ class MCTSAgent(Agent):
         # sample buffers
         raw_canonical_boards = []
         action_ids = []
-        
+
         player_id = 1
         init_player_id = player_id
         board = self.game.get_empty_board()
@@ -209,22 +209,17 @@ class MCTSAgent(Agent):
             if reward is not None:
                 break
 
-        # do some data augmentation
-        canonical_boards = np.stack(raw_canonical_boards) # (B, N, N)
-        canonical_boards = torch.from_numpy(canonical_boards).cuda()
-        
-        onehot_actions = F.one_hot(torch.tensor(action_ids),\
-                        num_classes=self.game.get_action_size()).cuda() # (B, N*N)
-        augmented_samples = self.game.get_symmetries(canonical_boards, onehot_actions)
+        return self.pack_samples([raw_canonical_boards], [action_ids], [reward], [init_player_id])[0]
 
-        return self.wrap_up_samples(raw_samples, reward)
-
-    def wrap_up_samples(self, raw_samples, reward, first_player = 1):
+    def pack_samples(self, 
+            canonical_boards: list[list[np.ndarray]], 
+            action_ids: list[list[int]], 
+            rewards: list[int], 
+            init_player_ids: list[int]
+        ):
 
         '''
-        raw_samples: [
-            (boards_1, action_ids_1), ..., (boards_8, action_ids_8)
-        ]
+        accept a batch of episodes
 
         post process samples,
         case:
@@ -239,28 +234,65 @@ class MCTSAgent(Agent):
                 reward = -reward
 
             reward = reward * player_id
+
+        return 
+        [ # episodes
+            [ # 8 directions * episode_lengths
+                (board, pi, reward), ...
+            ]
+        ] 
         '''
-        assert isinstance(raw_samples, list)
+        assert len(canonical_boards) == len(action_ids) == len(rewards) == len(init_player_ids)
 
-        def tensor_to_numpy(board, pi):
-            if isinstance(board, torch.Tensor):
-                board = board.cpu().numpy()
-                pi = pi.cpu().numpy()
-            
-            # (B, n, n) to a list of B (n, n) np arrays
-            return list(board), list(pi)
+        episode_lengths = []
+        _boards, _action_ids, _player_ids, _rewards = [], [], [], []
+        for idx in range(len(action_ids)):
+            # note length for each episode
+            elength = len(action_ids[idx])
+            episode_lengths.append(elength)
 
-        num_steps = raw_samples[0].shape[0]
+            _boards.append(np.stack(canonical_boards[idx])) # [(b1, n, n), (b2, n, n), ...]
+            _action_ids.append(np.array(action_ids[idx], dtype=np.int64)) # (B,)
 
-        player_ids = np.ones(num_steps, dtype=np.int64) * first_player
-        player_ids[1::2] *= -1
-        group_rewards = list(reward * player_ids)
+            player_ids = np.ones(elength, dtype=np.int64) * init_player_ids[idx]
+            player_ids[1::2] = - init_player_ids[idx]
+            _player_ids.append(player_ids)
 
-        samples = []
-        for sample_group in raw_samples:
-            board, pi = tensor_to_numpy(*sample_group)
-            
+            _rewards.append(np.ones(elength, dtype=np.int64) * rewards[idx])
+        
+        # B = b1 + b2 + ... + b_n, where b_i is the length of i-th episode
+        boards = np.concatenate(_boards, axis=0) #(B, N, N)
+        action_ids = np.concatenate(_action_ids, axis=0) #(B,)
+        player_ids = np.concatenate(_player_ids, axis=0) #(B,)
+        rewards = np.concatenate(_rewards, axis=0) #(B,)
 
-            samples.extend(list(zip(board, pi, group_rewards)))
-            
+        boards = torch.from_numpy(boards).float()
+        action_ids = torch.from_numpy(action_ids)
+        if torch.cuda.is_available():
+            boards = boards.cuda()
+            action_ids = action_ids.cuda()
+
+        # do some data augmentation
+        onehot_actions = F.one_hot(action_ids, num_classes=self.game.get_action_size()) # (B, N*N)
+        augmented_samples = self.game.get_symmetries(boards, onehot_actions) # (8, B, N*N)
+
+        break_points = np.cumsum(episode_lengths)[:-1]
+        group_rewards = rewards * player_ids
+        group_rewards = list(np.split(group_rewards, break_points))
+        group_rewards = [list(rewards) for rewards in group_rewards] 
+
+        samples = [[] for _ in range(len(episode_lengths))]
+
+        for (board, pi) in augmented_samples:
+            board = board.cpu().numpy()
+            pi = pi.cpu().numpy()
+
+            board = list(np.split(board, break_points))
+            pi = list(np.split(pi, break_points))
+
+            for idx in range(len(board)):
+
+                board_ls, pi_ls = list(board[idx]), list(pi[idx])
+                samples[idx].extend(list(zip(board_ls, pi_ls, group_rewards[idx])))
+
         return samples

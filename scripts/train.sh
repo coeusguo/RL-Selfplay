@@ -1,8 +1,11 @@
 python ray_train.py \
-    -num-tree-search 10 \
-    -trainer-data-buffer-size 1000 \
-    -board-size 5 \
-    -num-in-a-row 4 \
-    -batch-size 54 \
-    -num-mini-epoch 5 \
-    -eval-every 2
+    -main-epoch 3000 \
+    -num-tree-search 20 \
+    -trainer-data-buffer-size 500 \
+    -rollout-buffer-size 24 \
+    -board-size 12 \
+    -num-in-a-row 5 \
+    -batch-size 64 \
+    -num-mini-epoch 2 \
+    -eval-every 10 \
+    -save-every 10 

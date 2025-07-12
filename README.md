@@ -1,7 +1,7 @@
 # RL-Selfplay
 training an agent to play chess  by RL with self-play
 
-``sh script/train.sh`` to start the training
+``sh script/train.sh`` to start the training, requires two GPUs
 
 ## done
 1. Gomoku Chess board
@@ -11,8 +11,6 @@ training an agent to play chess  by RL with self-play
 5. Battle Arena
 
 ## todos
-0. Faster training
-1. Efficient Policy Models
-2. User interface
-3. PPO baseline
-4. Other Chess games like Go and Othello
+1. User interface
+2. PPO baseline
+3. Other Chess games like Go and Othello

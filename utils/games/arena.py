@@ -29,7 +29,7 @@ class Arena:
 
             # save samples if needed
             if keep_samples:
-                raw_samples.append((canonical_board, action_id, player_id))
+                raw_samples.append((canonical_board, action_id))
             board, player_id = game.get_next_state(board, player_id, action_id)
 
             # check user winning condition
@@ -79,7 +79,11 @@ class Arena:
                 progress_bar.update(1)
 
             if keep_samples:
-                total_samples.append(samples)
+                init_player_id = 1 if first_move else -1
+                total_samples.append({
+                    "samples":samples, 
+                    "init_player_id": init_player_id, 
+                    "reward": reward})
 
         return num_win, num_lose, num_draw, total_samples
         

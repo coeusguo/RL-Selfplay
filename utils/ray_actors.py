@@ -55,9 +55,13 @@ class Trainer:
         self.num_mini_epoch = args.num_mini_epoch
         self.batch_size = args.batch_size
         self.sample_buffer = deque()
-        
+
         # initialize policy model
         self.policy = get_wrapped_policy(args)
+
+        # save a game and agent object for self play matching
+        self.game = get_game(self.args)
+        self.agent = get_agent(self.args, self.policy, self.game)
 
         # initialize optimizer 
         self.optimizer = get_optimizer(args, self.policy.get_policy())
@@ -111,7 +115,7 @@ class Trainer:
                 loss.backward()
                 self.optimizer.step()
 
-        return total_loss / e / num_batches
+        return total_loss / self.num_mini_epoch / num_batches
 
     def save_checkpoint(self, save_dir: PosixPath | str):
 
@@ -147,35 +151,55 @@ class Trainer:
             self.sample_buffer.popleft()
         self.sample_buffer.append(episode)
 
-    def dual(self, old_policy_ckpt: OrderedDict):
-        game = get_game(self.args)
+    def match_one_round(self, 
+        old_policy_ckpt: OrderedDict | None = None, 
+        clear_cache_after_eval: bool = False
+    ):
+        if old_policy_ckpt is not None:
+            old_policy = get_wrapped_policy(self.args)
+            old_policy.load_state_dict(old_policy_ckpt)
+            old_policy.eval()
+            self.old_agent = get_agent(self.args, old_policy, self.game)
 
-        old_policy = get_wrapped_policy(self.args)
-        old_policy.load_state_dict(old_policy_ckpt)
-        old_agent = get_agent(self.args, old_policy, game)
-
-        new_agent = get_agent(self.args, self.policy, game)
+        self.policy.eval()
 
         num_win, num_lose, num_draw, raw_samples = Arena.multiple_matches(
-            new_agent.mcts,
-            old_agent.mcts,
-            game,
-            num_match=25,
+            self.agent.mcts,
+            self.old_agent.mcts,
+            self.game,
+            num_match=2,
             use_tqdm=False,
             keep_samples=True
         )
-
         '''
             reuse the match samples for training
             raw_samples: [
-                [
-                    (board, action, player_id), (board, action, player_id), ...
-                ],
+                {
+                "samples": [(board, action_id), (board, action_id), ...],
+                "init_player_id": int
+                "reward": int
+                },
                 ...
             ]
         '''
-        raw_samples
+        boards, action_ids, rewards, init_player_ids = [], [], [], []
+        for idx in range(len(raw_samples)):
+            board, action_id = zip(*raw_samples[idx]["samples"])
+            boards.append(board)
+            action_ids.append(action_id)
+            rewards.append(raw_samples[idx]["reward"])
+            init_player_ids.append(raw_samples[idx]["init_player_id"])
 
-        none_draw_win_rate = num_win / (num_win + num_lose)
+        samples = self.agent.pack_samples(boards, action_ids, rewards, init_player_ids)
+        for sample in samples:
+            self.update_train_sample(sample)
 
-        return none_draw_win_rate
+        if clear_cache_after_eval:
+            self.old_agent = None
+            # clear the buffer for fair game in the future
+            self.agent.init_buffer()
+
+        return num_win, num_lose, num_draw
+
+    def dual(self,):
+        pass

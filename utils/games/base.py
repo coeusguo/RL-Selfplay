@@ -70,3 +70,12 @@ class BoardGame(abc.ABC):
             augmented.append(restore(flipped_board, flipped_pi))
 
         return augmented
+
+
+    def get_readable_board(self, board):
+        cache = []
+        for row in range(board.shape[0]):
+            for col in range(board.shape[1]):
+                cache.append(self.idx_to_piece[board[row, col]])
+            cache.append("\n")
+        return " " + " ".join(cache)

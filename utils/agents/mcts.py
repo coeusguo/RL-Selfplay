@@ -23,13 +23,13 @@ class MCTS:
         self.Q_sa = defaultdict(float)
         
         # pi(s, *):
-        self.pi_s = defaultdict(None)
+        self.pi_s = defaultdict(lambda: None)
 
         # valide moves at state s
         self.valid_move_s = defaultdict(int)
 
         # store the terminal rewards if s is terminal state
-        self.terminal_reward = defaultdict(None)
+        self.terminal_reward = defaultdict(lambda: "not_visited")
 
     def clear_search_tree(self):
         self.N_s.clear()
@@ -56,13 +56,14 @@ class MCTS:
         None if not terminal
         1 for win, -1 for lose, 0 for draw
         '''
-        self.terminal_reward[s] = self.game.is_terminal(canonical_board, cur_player_id)
-
         # return rewards if S is a terminal state
-        if self.terminal_reward[s] is not None:
+        if self.terminal_reward[s] != "not_visited" and self.terminal_reward[s] is not None:
             return self.terminal_reward[s]
+        
+        if self.terminal_reward[s] == "not_visited":
+            self.terminal_reward[s] = self.game.is_terminal(canonical_board, cur_player_id)
 
-        if not s in self.pi_s: # not visited before, take as leaf node
+        if self.pi_s[s] is None: # not visited before, take as leaf node
             # get predicted policy (pi) and state value (v)
             pi, v = self.policy.predict(canonical_board)
 
@@ -106,12 +107,12 @@ class MCTS:
 
         # get the maximized opponent state value
         s_opponent, opponent_id = self.game.get_next_state(canonical_board, cur_player_id, best_action)
+        s_opponent = self.game.get_canonical_form(s_opponent, opponent_id)
         opponent_v = self.tree_search(s_opponent)
 
         # update Q(s, a)
-        s_opponent = self.game.get_canonical_form(s_opponent, opponent_id)
-        self.Q_sa[(s, best_action)] = (self.Q_sa[(s, best_action)] * self.N_s[s] - opponent_v) / \
-                                      (self.N_s[s] + 1)
+        self.Q_sa[(s, best_action)] = (self.Q_sa[(s, best_action)] * self.N_sa[(s, best_action)] - opponent_v) / \
+                                      (self.N_sa[(s, best_action)] + 1)
 
         # increment N(s) and N(s, a) by 1
         self.N_s[s] += 1
@@ -170,7 +171,7 @@ class MCTSAgent(Agent):
     def init_buffer(self):
         self.mcts.clear_search_tree()
 
-    def run_one_episode(self) -> list[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    def run_one_episode(self, non_draw = False) -> list[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
         self.policy.eval()
 
         # sample buffers
@@ -206,6 +207,14 @@ class MCTSAgent(Agent):
             
             # check terminal condition
             reward = self.game.is_terminal(board, init_player_id)
+            if non_draw and reward == 0:
+                # draw, but requires non-draw game, restart the game
+                board = self.game.get_empty_board()
+                raw_canonical_boards = []
+                action_ids = []
+                player_id = init_player_id
+                continue
+
             if reward is not None:
                 break
 
@@ -228,9 +237,9 @@ class MCTSAgent(Agent):
             - reward = 0, draw
 
             therefore:
-            player_id = 1:
+            init_player_id = 1:
                 reward = reward
-            player_id = -1:
+            init_player_id = -1:
                 reward = -reward
 
             reward = reward * player_id

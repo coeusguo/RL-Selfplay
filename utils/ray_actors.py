@@ -30,16 +30,19 @@ class SelfPlayActor:
 
         self.policy.to(self.device)
 
+        print("hard coded the search depth to 20!")
+        self.agent.mcts.num_tree_search = 20
+
     def ready(self):
         return True
 
-    def generate_one_episode(self) -> list[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
-        return self.agent.run_one_episode()
+    def generate_one_episode(self, non_draw = False) -> list[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+        return self.agent.run_one_episode(non_draw=non_draw)
         
     def load_checkpoint(self, state_dict: OrderedDict):
         self.policy.load_state_dict(state_dict)
 
-        # the policy has been updated, should clean old buffers (if any)
+        # the policy has been updated, should clear old buffers (if any)
         self.agent.init_buffer()
 
     def get_checkpoint(self):
@@ -149,6 +152,13 @@ class Trainer:
     def update_train_sample(self, episode: list[Tuple[np.ndarray, np.ndarray, np.ndarray]]):
         if len(self.sample_buffer) > self.buffer_size:
             self.sample_buffer.popleft()
+        
+        # for (b, a, v) in episode:
+            # print("-" * 50)
+            # print(self.game.get_readable_board(b))
+            # a = np.argmax(a)
+            # print(f"action: {a}, reward: {v.item()}")
+        # print("=" * 50)
         self.sample_buffer.append(episode)
 
     def match_one_round(self, 
@@ -169,7 +179,8 @@ class Trainer:
             self.game,
             num_match=2,
             use_tqdm=False,
-            keep_samples=True
+            keep_samples=True,
+            non_draw=True,
         )
         '''
             reuse the match samples for training
@@ -182,17 +193,19 @@ class Trainer:
                 ...
             ]
         '''
-        boards, action_ids, rewards, init_player_ids = [], [], [], []
-        for idx in range(len(raw_samples)):
-            board, action_id = zip(*raw_samples[idx]["samples"])
-            boards.append(board)
-            action_ids.append(action_id)
-            rewards.append(raw_samples[idx]["reward"])
-            init_player_ids.append(raw_samples[idx]["init_player_id"])
+        if len(raw_samples) > 0:
+            boards, action_ids, rewards, init_player_ids = [], [], [], []
+            for idx in range(len(raw_samples)):
+                board, action_id = zip(*raw_samples[idx]["samples"])
+                boards.append(board)
+                action_ids.append(action_id)
+                rewards.append(raw_samples[idx]["reward"])
+                init_player_ids.append(raw_samples[idx]["init_player_id"])
 
-        samples = self.agent.pack_samples(boards, action_ids, rewards, init_player_ids)
-        for sample in samples:
-            self.update_train_sample(sample)
+        
+            samples = self.agent.pack_samples(boards, action_ids, rewards, init_player_ids)
+            for sample in samples:
+                self.update_train_sample(sample)
 
         if clear_cache_after_eval:
             self.old_agent = None

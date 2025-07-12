@@ -21,7 +21,7 @@ def train(args):
 
     # prefill some traing samples
     temp_buffer = []
-    temp_buffer = deque([rollout_actor.generate_one_episode.remote() for _ in range(10)])
+    temp_buffer = deque([rollout_actor.generate_one_episode.remote(non_draw=True) for _ in range(10)])
     for _ in tqdm(range(len(temp_buffer)), desc="Generating Initial Train Samples"):
         samples = ray.get(temp_buffer.popleft())
         trainer.update_train_sample.remote(samples)
@@ -81,8 +81,7 @@ def train(args):
                 win_rate = total_win / (total_win + total_lose)
 
                 # update rollout policy if win rate reaches threshold
-                if win_rate > args.update_threshold:
-
+                if win_rate + 1e-5 > args.update_threshold:
                     num_rollout_policy_update += 1
                     state_dict = ray.get(trainer.get_checkpoint.remote())
                     rollout_actor.load_checkpoint.remote(state_dict)
@@ -92,7 +91,7 @@ def train(args):
 
             # update training buffer
             if len(rollout_buffer) > 0:
-                ready_refs, _ = ray.wait(list(rollout_buffer), num_returns=1)
+                ready_refs, _ = ray.wait(list(rollout_buffer))
                 for _ in range(len(ready_refs)):
                     sample_ref = rollout_buffer.popleft()
                     samples = ray.get(sample_ref)
@@ -100,7 +99,7 @@ def train(args):
 
             train_ref = trainer.train_one_epoch.remote()
 
-        if epoch > args.main_epoch:
+        if epoch >= args.main_epoch:
             break
             
 if __name__ == "__main__":

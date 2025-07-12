@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 from typing import Tuple
 
-NUM_CHANNELS = [512, 512, 512]
+NUM_CHANNELS = [512, 512]
 HEAD_DIM = 64
 
 class ResidualBlock(nn.Module):
@@ -22,14 +22,15 @@ class ResidualBlock(nn.Module):
 
 
 class AttentionPool(nn.Module):
-    def __init__(self, in_channel):
+    def __init__(self, in_channel, dropout=0.1):
         super().__init__()
         self.query = nn.Parameter(torch.randn(1, in_channel))
 
         self.attn = nn.MultiheadAttention(
                         embed_dim=in_channel,
                         num_heads=HEAD_DIM,
-                        batch_first=True
+                        batch_first=True,
+                        dropout=dropout
                     )
 
     def forward(self, x):

@@ -1,11 +1,15 @@
 python ray_train.py \
     -main-epoch 3000 \
-    -num-tree-search 20 \
-    -trainer-data-buffer-size 500 \
-    -rollout-buffer-size 24 \
-    -board-size 12 \
+    -num-tree-search 10 \
+    -trainer-data-buffer-size 200 \
+    -rollout-buffer-size 5 \
+    -board-size 10 \
     -num-in-a-row 5 \
     -batch-size 64 \
-    -num-mini-epoch 2 \
-    -eval-every 10 \
-    -save-every 10 
+    -num-mini-epoch 1 \
+    -eval-every 20 \
+    -save-every 10 \
+    -num-eval-matches 5 \
+    -temp-decay-step 40 \
+    -temp-decay-rate 0.1 \
+    -update-threshold 0.6

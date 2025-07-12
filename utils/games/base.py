@@ -71,7 +71,6 @@ class BoardGame(abc.ABC):
 
         return augmented
 
-
     def get_readable_board(self, board):
         cache = []
         for row in range(board.shape[0]):

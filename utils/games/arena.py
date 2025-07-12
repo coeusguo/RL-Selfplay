@@ -48,7 +48,8 @@ class Arena:
         game: BoardGame, 
         num_match: int, 
         use_tqdm: bool = True,
-        keep_samples: bool = False
+        keep_samples: bool = False,
+        non_draw: bool = False
     ):
         num_win = num_draw = num_lose = 0
         if use_tqdm:
@@ -80,6 +81,8 @@ class Arena:
 
             if keep_samples:
                 init_player_id = 1 if first_move else -1
+                if non_draw and reward == 0:
+                    continue
                 total_samples.append({
                     "samples":samples, 
                     "init_player_id": init_player_id, 

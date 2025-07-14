@@ -30,13 +30,14 @@ class SelfPlayActor:
 
         self.policy.to(self.device)
 
-        print("hard coded the search depth to 20!")
-        self.agent.mcts.num_tree_search = 20
+        print(f"doubled search depth to {args.num_tree_search * 2}!")
+        self.agent.mcts.num_tree_search = args.num_tree_search * 2
 
     def ready(self):
         return True
 
     def generate_one_episode(self, non_draw = False) -> list[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+        self.agent.init_buffer()
         return self.agent.run_one_episode(non_draw=non_draw)
         
     def load_checkpoint(self, state_dict: OrderedDict):
@@ -196,18 +197,19 @@ class Trainer:
                 ...
             ]
         '''
-        if len(raw_samples) > 0:
-            boards, action_ids, rewards, init_player_ids = [], [], [], []
-            for idx in range(len(raw_samples)):
-                board, action_id = zip(*raw_samples[idx]["samples"])
-                boards.append(board)
-                action_ids.append(action_id)
-                rewards.append(raw_samples[idx]["reward"])
-                init_player_ids.append(raw_samples[idx]["init_player_id"])
-        
-            samples = self.agent.pack_samples(boards, action_ids, rewards, init_player_ids)
-            for sample in samples:
-                self.update_train_sample(sample)
+        if self.args.reuse_eval_sample:
+            if len(raw_samples) > 0:
+                boards, action_ids, rewards, init_player_ids = [], [], [], []
+                for idx in range(len(raw_samples)):
+                    board, action_id = zip(*raw_samples[idx]["samples"])
+                    boards.append(board)
+                    action_ids.append(action_id)
+                    rewards.append(raw_samples[idx]["reward"])
+                    init_player_ids.append(raw_samples[idx]["init_player_id"])
+            
+                samples = self.agent.pack_samples(boards, action_ids, rewards, init_player_ids)
+                for sample in samples:
+                    self.update_train_sample(sample)
 
         if clear_cache_after_eval:
             # since the new policy model will be updated, clear all the old buffers

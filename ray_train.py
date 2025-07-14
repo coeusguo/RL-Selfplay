@@ -23,7 +23,7 @@ def train(args):
 
     # prefill some traing samples
     temp_buffer = []
-    temp_buffer = deque([rollout_actor.generate_one_episode.remote(non_draw=True) \
+    temp_buffer = deque([rollout_actor.generate_one_episode.remote() \
                                 for _ in range(min(20, args.trainer_data_buffer_size))])
 
     for _ in tqdm(range(len(temp_buffer)), desc="Generating Initial Train Samples"):

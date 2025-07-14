@@ -43,6 +43,9 @@ def parse_args():
                         help="during aync. training, the maximum buffer size to store the rollout samples")
     parser.add_argument("-num-eval-matches", type=int, default=12, 
                         help="number of matches during evaluation")
+    parser.add_argument("-reuse-eval-sample", action="store_true", 
+                        help="since the evaluation takes time, enbale reuse-eval-sample to speed up sample colletion")
+
 
     # mcts related
     parser.add_argument("-puct-factor", type=float, default=1.0)

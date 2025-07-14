@@ -48,16 +48,15 @@ class MCTS:
 
         if not num_visits_only:
             self.pi_s.clear()
-            # self.valid_move_s.clear()
-            # self.terminal.clear()
+            self.valid_move_s.clear()
+            self.terminal.clear()
         
     def tree_search(self, canonical_board: np.ndarray) -> np.ndarray:
         '''
             since our game board is very small (< 10 x 10)
             the computation of MCTS will be on CPU (except for executing policy model)
         '''
-        self.num += 1
-        
+
         # default player_id = 1, due to canonical board as the input
         cur_player_id = 1
 
@@ -102,7 +101,7 @@ class MCTS:
         ucb = self.Q_sa[s] + self.puct_factor * self.pi_s[s] * np.sqrt(self.N_s[s]) / (self.N_sa[s] + 1)
         valid_ucb = np.where(self.valid_move_s[s], ucb, -np.inf)
         highest_ucb = np.max(valid_ucb)
-        best_actions = np.argwhere(valid_ucb == highest_ucb).reshape(-1)
+        best_actions = np.flatnonzero(valid_ucb == highest_ucb)
         best_action = np.random.choice(best_actions)
 
         # get the maximized opponent state value

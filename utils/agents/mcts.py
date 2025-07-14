@@ -1,5 +1,6 @@
 
 import math
+import threading
 import random
 import torch
 import numpy as np
@@ -7,6 +8,7 @@ import torch.nn.functional as F
 from typing import Tuple
 from collections import defaultdict
 from .base import Agent
+import time
 
 class MCTS:
     def __init__(self, args, game, policy):
@@ -14,61 +16,69 @@ class MCTS:
         self.policy = policy
         self.puct_factor = args.puct_factor
         self.num_tree_search = args.num_tree_search
+        self.action_size = game.get_action_size()
+        self.board_size = game.get_board_size()
         
         # frequency N(s) and N(s, a)
         self.N_s = defaultdict(int)
-        self.N_sa = defaultdict(int)
+        self.N_sa = defaultdict(lambda: np.zeros(self.action_size, dtype=np.int64))
 
         # Q(s, a)
-        self.Q_sa = defaultdict(float)
+        self.Q_sa = defaultdict(lambda: np.zeros(self.action_size, dtype=np.float32))
         
         # pi(s, *):
         self.pi_s = defaultdict(lambda: None)
 
         # valide moves at state s
-        self.valid_move_s = defaultdict(int)
+        self.valid_move_s = defaultdict()
 
-        # store the terminal rewards if s is terminal state
-        self.terminal_reward = defaultdict(lambda: "not_visited")
+        '''
+            -1 means not visited, 0 means draw, 1 means win
+            since seart function always takes canonical board as input
+            we only need to check if player 1 wins,
+        '''
+        self.terminal = defaultdict(lambda: None)
 
-    def clear_search_tree(self):
+        self.num = 0
+
+    def clear_search_tree(self, num_visits_only = False):
         self.N_s.clear()
         self.N_sa.clear()
         self.Q_sa.clear()
-        self.pi_s.clear()
-        self.valid_move_s.clear()
-        self.terminal_reward.clear()
+
+        if not num_visits_only:
+            self.pi_s.clear()
+            # self.valid_move_s.clear()
+            # self.terminal.clear()
         
     def tree_search(self, canonical_board: np.ndarray) -> np.ndarray:
         '''
-        since our game board is very small (< 10 x 10)
-        the computation of MCTS will be on CPU (except for executing policy model)
+            since our game board is very small (< 10 x 10)
+            the computation of MCTS will be on CPU (except for executing policy model)
         '''
-
-        # default player_id = 1 (-1 for opponent)
+        self.num += 1
+        
+        # default player_id = 1, due to canonical board as the input
         cur_player_id = 1
 
         # convert 2D integer array to byte for dict hash operations
         s = canonical_board.tobytes()
 
-        '''
-        check if s is a terminal state
-        None if not terminal
-        1 for win, -1 for lose, 0 for draw
-        '''
-        # return rewards if S is a terminal state
-        if self.terminal_reward[s] != "not_visited" and self.terminal_reward[s] is not None:
-            return self.terminal_reward[s]
-        
-        if self.terminal_reward[s] == "not_visited":
-            self.terminal_reward[s] = self.game.is_terminal(canonical_board, cur_player_id)
+        if self.terminal[s] is not None:
+            return self.terminal[s]
 
         if self.pi_s[s] is None: # not visited before, take as leaf node
-            # get predicted policy (pi) and state value (v)
-            pi, v = self.policy.predict(canonical_board)
 
             # check valid moves at state (s)
             valid_moves = self.game.get_valid_moves(canonical_board)
+
+            if np.sum(valid_moves) == 0:
+                # no valid moves, must be a draw state
+                self.terminal[s] = 0
+                return 0
+            
+            # get predicted policy (pi) and state value (v)
+            pi, v = self.policy.predict(canonical_board)
 
             # mask out invalid moves of pi
             pi = pi * valid_moves 
@@ -85,74 +95,63 @@ class MCTS:
             # store valid moves at state (s)
             self.valid_move_s[s] = valid_moves
             # take as leaf node, return state estimate
-            return v
-        
-        # not a leaf node, compute PUCT
-        pi_s = self.pi_s[s]
-        highest_u = -float('inf')
-        best_action = None
-        for action_id, is_valid in enumerate(self.valid_move_s[s]):
-            if not is_valid:
-                continue
-            
-            # compute ucb
-            ucb = self.Q_sa[(s, action_id)] + self.puct_factor * pi_s[action_id] * \
-                    math.sqrt(self.N_s[s]) / (self.N_sa[(s, action_id)] + 1)
-            # update highest Q
-            if ucb > highest_u:
-                highest_u = ucb
-                best_action = action_id
 
-        assert best_action is not None
+            return v
+
+        # multi-arm bandit, compute and pick the action with the highest UCB
+        ucb = self.Q_sa[s] + self.puct_factor * self.pi_s[s] * np.sqrt(self.N_s[s]) / (self.N_sa[s] + 1)
+        valid_ucb = np.where(self.valid_move_s[s], ucb, -np.inf)
+        highest_ucb = np.max(valid_ucb)
+        best_actions = np.argwhere(valid_ucb == highest_ucb).reshape(-1)
+        best_action = np.random.choice(best_actions)
 
         # get the maximized opponent state value
-        s_opponent, opponent_id = self.game.get_next_state(canonical_board, cur_player_id, best_action)
-        s_opponent = self.game.get_canonical_form(s_opponent, opponent_id)
-        opponent_v = self.tree_search(s_opponent)
+        updated_board, opponent_id = self.game.get_next_state(canonical_board, cur_player_id, best_action)
+
+        # oppenent's turn 
+        canonical_board = self.game.get_canonical_form(updated_board, opponent_id)
+
+        if self.game.wins_here(updated_board, best_action):
+            # check terminal state, updated_board is also canonical to cur_player_id
+            self.terminal[canonical_board.tobytes()] = -1
+
+        opponent_v = self.tree_search(canonical_board)
 
         # update Q(s, a)
-        self.Q_sa[(s, best_action)] = (self.Q_sa[(s, best_action)] * self.N_sa[(s, best_action)] - opponent_v) / \
-                                      (self.N_sa[(s, best_action)] + 1)
+        self.Q_sa[s][best_action] = (self.Q_sa[s][best_action] * self.N_sa[s][best_action] - opponent_v) / \
+                                      (self.N_sa[s][best_action] + 1)
 
         # increment N(s) and N(s, a) by 1
         self.N_s[s] += 1
-        self.N_sa[(s, best_action)] += 1
+        self.N_sa[s][best_action] += 1
 
         # return the state value of child node of (s), by taking the best action
         return -opponent_v
-    
 
     def action_probs(self, canonical_board: np.ndarray, temperature: float = 1.0) -> np.ndarray:
+        
         s = canonical_board.tobytes()
 
         # perform tree search
-        for _ in range(self.num_tree_search):
+        for i in range(self.num_tree_search):
+            self.num = 0
             self.tree_search(canonical_board)
-
-        valid_moves = self.valid_move_s[s]
-        visting_freq = np.zeros_like(valid_moves)
-        for action_id, is_valid in enumerate(valid_moves):
-            if not is_valid:
-                continue
-            visting_freq[action_id] = self.N_sa[(s, action_id)]
-        
-        # sanity check
-        assert self.N_s[s] == np.sum(visting_freq), f"{self.N_s[s]=}, {np.sum(visting_freq)=}"
 
         if temperature == 0:# deterministic
             # in case of multiple (s, a) pairs have same visiting frequency
-            highest_freq = np.max(visting_freq)
-            best_actions = np.array(np.argwhere(visting_freq == highest_freq)).reshape(-1)
+            highest_freq = np.max(self.N_sa[s])
+            best_actions = np.argwhere(self.N_sa[s] == highest_freq).reshape(-1)
 
             # randomly select 1 best actions (if there is multiple)
             best_action = np.random.choice(best_actions)
-            probs = np.zeros_like(valid_moves)
+            probs = np.zeros(self.action_size)
             probs[best_action] = 1
 
         else:
             # smooth out the probs by temperature
-            visting_freq = (visting_freq) ** (1 / temperature)
+            visting_freq = (self.N_sa[s]) ** (1 / temperature)
             probs = visting_freq / np.sum(visting_freq)
+
         return probs
     
 
@@ -166,10 +165,8 @@ class MCTSAgent(Agent):
         self.decay_step = args.temp_decay_step
         self.decay_rate = args.temp_decay_rate
 
-        # 
-
-    def init_buffer(self):
-        self.mcts.clear_search_tree()
+    def init_buffer(self, num_visits_only = False):
+        self.mcts.clear_search_tree(num_visits_only)
 
     def run_one_episode(self, non_draw = False) -> list[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
         self.policy.eval()
@@ -181,6 +178,8 @@ class MCTSAgent(Agent):
         player_id = 1
         init_player_id = player_id
         board = self.game.get_empty_board()
+        self.init_buffer(num_visits_only=True)
+
         temp = self.temperature
         decayed = False
         step = 0
@@ -216,6 +215,8 @@ class MCTSAgent(Agent):
                 continue
 
             if reward is not None:
+                # print(self.game.get_readable_board(board))
+                # print(f"{reward=}")
                 break
 
         return self.pack_samples([raw_canonical_boards], [action_ids], [reward], [init_player_id])[0]
@@ -232,11 +233,11 @@ class MCTSAgent(Agent):
 
         post process samples,
         case:
-            - reward = 1, user win, opponent lose
-            - reward = -1, user lose, oppenent win
+            - reward = 1, init_player win, opponent lose
+            - reward = -1, init_player lose, oppenent win
             - reward = 0, draw
 
-            therefore:
+        therefore, if:
             init_player_id = 1:
                 reward = reward
             init_player_id = -1:
@@ -305,3 +306,55 @@ class MCTSAgent(Agent):
                 samples[idx].extend(list(zip(board_ls, pi_ls, group_rewards[idx])))
 
         return samples
+
+
+class AyncMCTSOpponent(MCTSAgent):
+    def __init__(self, args, policy, game, player_id = -1):
+        super(AyncMCTSOpponent, self).__init__(args, policy, game)
+
+        self.player_id = player_id
+        self.stop_event = threading.Event()
+        self.worker = None
+
+        init_board = self.game.get_empty_board()
+        self.endless_tree_search(init_board)
+
+    def _search_loop(self, canonical_board):
+        # this function will keep calling self.mcts.tree_search(canonical_board)
+        while self.stop_event.is_set():
+            self.mcts.tree_search(canonical_board)
+            time.sleep(0.05)
+
+    def endless_tree_search(self, canonical_board):
+
+        if self.worker is not None and self.worker.is_alive():
+            self.stop_event.clear()
+            self.worker.join()
+
+        # restart a new thread
+        self.stop_event.set()
+        self.worker = threading.Thread(
+            target=self._search_loop, args=(canonical_board,)
+        )
+        self.worker.start()
+
+    def move(self, board):
+        canonical_board = self.game.get_canonical_form(board, self.player_id)
+
+        # stop endless_tree_seach
+        self.stop_event.clear()
+        self.worker.join()
+
+        # perform tree search again
+        for _ in range(self.mcts.num_tree_search):
+            self.mcts.tree_search(canonical_board)
+
+        action_id = np.argmax(self.mcts.action_probs(canonical_board, temperature=0))
+
+        board, next_player_id = self.game.get_next_state(board, self.player_id, action_id)
+        canonical_board = self.game.get_canonical_form(board, next_player_id)
+
+        # restart the endless tree search on new board
+        self.endless_tree_search(canonical_board)
+
+        return action_id

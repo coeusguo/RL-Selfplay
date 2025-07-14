@@ -1,3 +1,4 @@
+import os
 import argparse
 import datetime
 from pathlib import Path
@@ -19,7 +20,6 @@ def parse_args():
     parser.add_argument("-lr", type=float, default=5e-4)
     parser.add_argument("-weight-decay", type=float, default=0.1)
     parser.add_argument("-dropout", type=float, default=0.0)
-    parser.add_argument("-train-buffer-size", type=int, default=15)
     parser.add_argument("-optimizer", type=str, default="adamw")
     parser.add_argument("-batch-size", type=int, default=64)
     parser.add_argument("-eval-every", type=int, default=2, help="how many epochs per evluate")
@@ -57,10 +57,16 @@ def parse_args():
     parser.add_argument("-log-dir", type=str, default="log")
     parser.add_argument("-save-every", type=int, default=10, help="how many epochs per evluate")
 
+    # checkpointing
+    parser.add_argument("-resume", action="store_true",  
+                    help="resume training")
+    parser.add_argument("-ckpt", type=str, default=None)
+
     args = parser.parse_args()
 
     # make unique log dir by time
     args.log_dir = Path(args.log_dir) / \
         f"{args.agent}_{args.game}_{args.board_size}x{args.board_size}_{datetime.datetime.now()}".replace(" ", "-")
+    os.makedirs(args.log_dir, exist_ok=True)
 
     return args

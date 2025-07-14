@@ -43,7 +43,7 @@ class SelfPlayActor:
         self.policy.load_state_dict(state_dict)
 
         # the policy has been updated, should clear old buffers (if any)
-        self.agent.init_buffer()
+        self.agent.init_buffer(num_visits_only=False)
 
     def get_checkpoint(self):
         return self.policy.state_dict()
@@ -61,6 +61,8 @@ class Trainer:
 
         # initialize policy model
         self.policy = get_wrapped_policy(args)
+        if args.ckpt is not None:
+            self.load_checkpoint(args.ckpt)
 
         # save a game and agent object for self play matching
         self.game = get_game(self.args)
@@ -78,6 +80,9 @@ class Trainer:
         self.device = torch.device("cuda:0")
 
         self.policy.to(self.device)
+
+        # will store old policy
+        self.old_agent = None
         
     def ready(self):
         return True
@@ -145,20 +150,15 @@ class Trainer:
         self.policy.load_state_dict(policy_state_dict)
 
         # load optimizer state dict if exists
-        if os.path.exists(ckpt_dir / "optimizer.pth"):
+        if self.args.resume:
+            assert os.path.exists(ckpt_dir / "optimizer.pth"), \
+                "resume flag on, but no optimizer state_dict found"
             optimizer_state_dict = torch.load(ckpt_dir / "optimizer.pth")
             self.optimizer.load_state_dict(optimizer_state_dict)
 
     def update_train_sample(self, episode: list[Tuple[np.ndarray, np.ndarray, np.ndarray]]):
         if len(self.sample_buffer) > self.buffer_size:
             self.sample_buffer.popleft()
-        
-        # for (b, a, v) in episode:
-            # print("-" * 50)
-            # print(self.game.get_readable_board(b))
-            # a = np.argmax(a)
-            # print(f"action: {a}, reward: {v.item()}")
-        # print("=" * 50)
         self.sample_buffer.append(episode)
 
     def match_one_round(self, 
@@ -166,11 +166,14 @@ class Trainer:
         clear_cache_after_eval: bool = False
     ):
         if old_policy_ckpt is not None:
-            old_policy = get_wrapped_policy(self.args)
-            old_policy.load_state_dict(old_policy_ckpt)
-            old_policy.eval()
-            self.old_agent = get_agent(self.args, old_policy, self.game)
+            if self.old_agent is None:
+                self.old_policy = get_wrapped_policy(self.args)
+                self.old_policy.to(self.device)
+                self.old_agent = get_agent(self.args, self.old_policy, self.game)
 
+            self.old_policy.load_state_dict(old_policy_ckpt)
+
+        self.old_policy.eval()
         self.policy.eval()
 
         num_win, num_lose, num_draw, raw_samples = Arena.multiple_matches(
@@ -201,18 +204,73 @@ class Trainer:
                 action_ids.append(action_id)
                 rewards.append(raw_samples[idx]["reward"])
                 init_player_ids.append(raw_samples[idx]["init_player_id"])
-
         
             samples = self.agent.pack_samples(boards, action_ids, rewards, init_player_ids)
             for sample in samples:
                 self.update_train_sample(sample)
 
         if clear_cache_after_eval:
-            self.old_agent = None
-            # clear the buffer for fair game in the future
+            # since the new policy model will be updated, clear all the old buffers
             self.agent.init_buffer()
+            self.old_agent.init_buffer()
 
         return num_win, num_lose, num_draw
 
     def dual(self,):
         pass
+
+@ray.remote(num_gpus=1)
+class AyncMCTSOpponent:
+    def __init__(self, args, player_id = -1):
+        super(AyncMCTSAgent, self).__init__(args, policy, game)
+
+        # setup ray gpu environment
+        gpu_ids = ray.get_gpu_ids()
+        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, gpu_ids))
+        self.device = torch.device("cuda:0")
+
+        policy = get_wrapped_policy(args)
+        try:
+            state_dict = torch.load(Path(args.ckpt) / "policy.pth")
+            policy.load_state_dict(state_dict)
+        except:
+            print("checking args.ckpt, but no checkpoint provided")
+
+        policy.to(self.device)
+        self.game = get_game(args)
+        self.mcts = get_agent(args, policy, self.game).mcts
+
+        # controls the endless searching loop
+        self.stop_search = False
+
+    def ready(self):
+        return True
+    
+    def endless_tree_search(self, canonical_board):
+        self.stop_search = False
+        self.search_stopped = False
+        while not self.stop_search:
+            self.mcts.tree_search(canonical_board)
+        self.search_stopped = True
+
+    def stop_tree_search(self):
+        self.stop_search = True
+        while not self.search_stopped:
+            continue
+        return True
+
+    def move(self, board):
+        canonical_board = self.game.get_canonical_form(board, self.player_id)
+        self.stop_tree_search()
+
+        # perform tree search again
+        for _ in range(self.mcts.num_tree_search):
+            self.mcts.tree_search(canonical_board)
+
+        action_id = np.argmax(self.mcts.action_probs(canonical_board, temperature=0))
+
+        board, next_player_id = self.game.get_next_state(board, self.player_id, action_id)
+        canonical_board = self.game.get_canonical_form(board, next_player_id)
+
+
+        return action_id

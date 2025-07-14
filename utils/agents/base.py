@@ -3,7 +3,7 @@ import abc
 class Agent(abc.ABC):
 
     @abc.abstractclassmethod
-    def init_buffer(self):
+    def init_buffer(self, *args, **kwargs):
         '''
         generic methods, will be called by rollout sampler to clean
         the buffer (if any), after loading the new policy checkpoint

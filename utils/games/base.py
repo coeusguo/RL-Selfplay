@@ -5,10 +5,19 @@ from typing import Literal, Tuple
 from functools import partial
 
 class BoardGame(abc.ABC):
+    idx_to_piece = {
+        -1: "X",
+        +0: "-",
+        +1: "O"
+    }
+    directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
     
     @abc.abstractclassmethod
     def get_action_size():
         pass
+
+    def get_board_size():
+        return self.n
 
     def get_canonical_form(self, 
             board: np.ndarray, 
@@ -72,9 +81,55 @@ class BoardGame(abc.ABC):
         return augmented
 
     def get_readable_board(self, board):
+        """
+        Creates a visually improved, grid-based board using Unicode
+        box-drawing characters for a cleaner look.
+        """
+        # Use a middle dot for empty spaces and define piece characters
+        
+        # Define the box-drawing characters for the grid
+        horizontal = "───"
+        vertical = "│"
+        top_left = "┌"
+        top_right = "┐"
+        bottom_left = "└"
+        bottom_right = "┘"
+        t_down = "┬"
+        t_up = "┴"
+        t_left = "├"
+        t_right = "┤"
+        cross = "┼"
+        
+        n = board.shape[0]
         cache = []
-        for row in range(board.shape[0]):
-            for col in range(board.shape[1]):
-                cache.append(self.idx_to_piece[board[row, col]])
-            cache.append("\n")
-        return " " + " ".join(cache)
+
+        # --- Build the board string row by row ---
+
+        # Create the column headers (e.g., "    1   2   3 ")
+        col_headers = [f"{i+1:^3}" for i in range(n)]
+        cache.append("   " + " ".join(col_headers))
+
+        # Create the top border of the grid (e.g., "  ┌───┬───┬───┐")
+        top_border = "  ┌" + (horizontal + t_down) * (n - 1) + horizontal + "┐"
+        cache.append(top_border)
+
+        # Create each row with pieces and separators
+        for r in range(n):
+            # Format the row with pieces (e.g., " 1 │ O │ X │ · │")
+            row_str = f"{r+1: >2}│"
+            for c in range(n):
+                piece = self.idx_to_piece[board[r, c]]
+                row_str += f" {piece} │"
+            cache.append(row_str)
+
+            # Add a separator line or the final bottom border
+            if r < n - 1:
+                # e.g., "  ├───┼───┼───┤"
+                separator = "  ├" + (horizontal + cross) * (n - 1) + horizontal + "┤"
+                cache.append(separator)
+            else:
+                # e.g., "  └───┴───┴───┘"
+                bottom_border = "  └" + (horizontal + t_up) * (n - 1) + horizontal + "┘"
+                cache.append(bottom_border)
+
+        return "\n".join(cache)

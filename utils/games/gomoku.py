@@ -1,6 +1,10 @@
 import numpy as np
+import tkinter as tk
+import random
+import time
 from typing import Literal, Tuple
 from .base import BoardGame
+from tkinter import messagebox
 
 class Board():
     '''
@@ -31,11 +35,6 @@ class Board():
 
 
 class GomokuGame(BoardGame):
-    idx_to_piece = {
-        -1: "X",
-        +0: "-",
-        +1: "O"
-    }
 
     @staticmethod
     def get_piece_from_idx(idx: Literal[-1, 0, 1]):
@@ -54,7 +53,7 @@ class GomokuGame(BoardGame):
 
     def get_board_size(self):
         # square board of size n by default
-        return (self.n, self.n)
+        return self.n
 
     def get_action_size(self):
         # n * n possible stone places for gomoku
@@ -66,7 +65,7 @@ class GomokuGame(BoardGame):
         b = Board(self.n, board)
 
         # 1-D action to 2-D action
-        move = (int(action_id / self.n), action_id % self.n)
+        move = (action_id // self.n, action_id % self.n)
         b.execute_move(move, player_id)
 
         # return next_state and opponent's id
@@ -87,60 +86,71 @@ class GomokuGame(BoardGame):
         # reshape to 1-D
         return valid_moves.reshape(-1)
 
+    def wins_here(self, board, position_1d):
+        row, col = position_1d // self.n, position_1d % self.n
+
+        player_id = board[row, col]
+        assert player_id != 0, "the position you provided is empty!"
+
+        for (d_row, d_col) in self.directions:
+            count = 1
+
+            # forward check
+            for idx in range(1, self.num_in_a_row): 
+                next_row = row + d_row * idx
+                next_col = col + d_col * idx
+                if next_row >= self.n or next_col >= self.n or next_row < 0 or next_col < 0:
+                    break
+                elif board[next_row, next_col] == player_id:
+                    count += 1
+                else: 
+                    break
+            
+            # backward check
+            for idx in range(1, self.num_in_a_row):
+                next_row = row - d_row * idx
+                next_col = col - d_col * idx
+
+                if next_row >= self.n or next_col >= self.n or next_row < 0 or next_col < 0:
+                    break
+                elif board[next_row, next_col] == player_id:
+                    count += 1
+                else:
+                    break
+
+            if count >= self.num_in_a_row:
+                return True
+        
+        return False
+
     def is_terminal(self, board, player: Literal[-1, 1]):
         '''
-        check if any of the players wins,
-        return None if not ended, 1 if player won, -1 if player lost, 0 if draw.
+            check if any of the players wins,
+            return: 
+                None, if not ended, 
+                1, if player won, 
+                -1, if player lost 
+                0, if draw.
+
+            causion:
+            if you passed in a canonical board, make sure player = 1 
         '''
-        
-        def is_win(pieces: np.ndarray):
-            if np.all(pieces == player):
-                return 1
-            if np.all(pieces == -player):
-                return -1
-            
-            return 0
-        
-        reward = 0 # -1 for lose, 1 for win
-        for idx in range(self.n * self.n):
-            row = idx // self.n
-            col = idx % self.n
 
-            # empty
-            if board[row, col] == 0: 
-                continue
+        has_epmty_place = False
+        for row in range(self.n):
+            for col in range(self.n):
+                # empty place
+                if board[row, col] == 0:
+                    has_epmty_place = True
+                    continue
 
-            # Check horizontal win
-            if col + self.num_in_a_row <= self.n:
-                horizontal_pieces = board[row, col: col + self.num_in_a_row]
-                reward = is_win(horizontal_pieces)
-                if not reward == 0: break
+                # check if any one wins at this position
+                if self.wins_here(board, row * self.n + col):
+                    return 1 if board[row, col] == player else -1
 
-            # Check vertical win
-            if row + self.num_in_a_row <= self.n:
-                vertical_pieces = board[row: row + self.num_in_a_row, col]
-                reward = is_win(vertical_pieces)
-                if not reward == 0: break
+        # no one wins but still has empty places -> game not terminated yet
+        if has_epmty_place:
+            return None
 
-            # Check diagonal (top-left to bottom-right) win
-            if row + self.num_in_a_row <= self.n and col + self.num_in_a_row <= self.n:
-                right_diag_pieces = board[np.arange(row, row + self.num_in_a_row), np.arange(col, col + self.num_in_a_row)]
-                reward = is_win(right_diag_pieces)
-                if not reward == 0: break
-
-            # Check diagonal (top-right to bottom-left) win
-            if row + self.num_in_a_row <= self.n and col >= self.num_in_a_row:
-                left_diag_pieces = board[np.arange(row, row + self.num_in_a_row), np.arange(col - self.num_in_a_row, col)[::-1]]
-                reward = is_win(left_diag_pieces)
-                if not reward == 0: break
-
-        if reward == 0:
-            # check if the board is full
-            b = Board(self.n, board)
-            if b.has_valid_moves():
-                # the game is not end
-                return None
-
-        return reward
-
-
+        # no one wins and no empty space left -> draw
+        return 0

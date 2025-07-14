@@ -17,11 +17,13 @@ class Arena:
             -1: player2
         }
         board = game.get_empty_board()
-        
+        board_size = game.get_board_size()
         raw_samples = [] if keep_samples else None
 
         player_id = 1 if first_move else -1
-        while True:
+        reward = 0
+
+        for _ in range(board_size * board_size):
             cur_player = players[player_id]
 
             canonical_board = game.get_canonical_form(board, player_id)
@@ -33,12 +35,12 @@ class Arena:
             board, player_id = game.get_next_state(board, player_id, action_id)
 
             # check user winning condition
-            reward = game.is_terminal(board, player=1)
-            if reward is not None:
+            if game.wins_here(board, action_id):
+                reward = -player_id
                 break
         
         # print(game.get_readable_board(board))
-        # print(f"{reward=}")
+        # print(f"{reward=}, {first_move=}")
         return reward, raw_samples
 
     @staticmethod

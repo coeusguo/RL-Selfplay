@@ -1,8 +1,10 @@
 import ray
+import torch
 from argument import parse_args
 from utils.ray_actors import SelfPlayActor, Trainer
 from collections import deque
 from tqdm import tqdm
+from pathlib import Path
 
 def train(args):
     rollout_actor = SelfPlayActor.remote(args)
@@ -21,7 +23,9 @@ def train(args):
 
     # prefill some traing samples
     temp_buffer = []
-    temp_buffer = deque([rollout_actor.generate_one_episode.remote(non_draw=True) for _ in range(10)])
+    temp_buffer = deque([rollout_actor.generate_one_episode.remote(non_draw=True) \
+                                for _ in range(min(20, args.trainer_data_buffer_size))])
+
     for _ in tqdm(range(len(temp_buffer)), desc="Generating Initial Train Samples"):
         samples = ray.get(temp_buffer.popleft())
         trainer.update_train_sample.remote(samples)
@@ -64,7 +68,7 @@ def train(args):
                 
                 eval_pb = tqdm(range(len(match_refs)), 
                                desc=f"Evaluation (old model: Gen {num_rollout_policy_update})", 
-                               position=1, leave=False)
+                               position=1)
                 total_win = total_lose = total_draw = total_matches = 0
                 for idx in eval_pb:
                     num_win, num_lose, num_draw = ray.get(match_refs[idx])
@@ -78,13 +82,15 @@ def train(args):
                         win_rate=f"{total_win / total_matches * 100:.2f}%"
                         )
 
-                win_rate = total_win / (total_win + total_lose)
+                win_rate = total_win / (total_win + total_lose + 1e-5)
 
                 # update rollout policy if win rate reaches threshold
                 if win_rate + 1e-5 > args.update_threshold:
+                    print(f"better model found, beat previous model with winning rate: {win_rate * 100:.2f}%")
                     num_rollout_policy_update += 1
                     state_dict = ray.get(trainer.get_checkpoint.remote())
                     rollout_actor.load_checkpoint.remote(state_dict)
+                    torch.save(state_dict, Path(args.log_dir) / "policy_best.pth")
 
             if epoch % args.save_every == 0:
                 trainer.save_checkpoint.remote(args.log_dir)

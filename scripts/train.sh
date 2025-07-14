@@ -12,4 +12,4 @@ python ray_train.py \
     -num-eval-matches 10 \
     -temp-decay-step 20 \
     -temp-decay-rate 0.1 \
-    -update-threshold 0.7
+    -update-threshold 0.65

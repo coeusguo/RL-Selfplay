@@ -43,7 +43,7 @@ class SelfPlayActor:
         self.policy.load_state_dict(state_dict)
 
         # the policy has been updated, should clear old buffers (if any)
-        self.agent.init_buffer(num_visits_only=False)
+        self.agent.init_buffer()
 
     def get_checkpoint(self):
         return self.policy.state_dict()
@@ -215,62 +215,3 @@ class Trainer:
             self.old_agent.init_buffer()
 
         return num_win, num_lose, num_draw
-
-    def dual(self,):
-        pass
-
-@ray.remote(num_gpus=1)
-class AyncMCTSOpponent:
-    def __init__(self, args, player_id = -1):
-        super(AyncMCTSAgent, self).__init__(args, policy, game)
-
-        # setup ray gpu environment
-        gpu_ids = ray.get_gpu_ids()
-        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, gpu_ids))
-        self.device = torch.device("cuda:0")
-
-        policy = get_wrapped_policy(args)
-        try:
-            state_dict = torch.load(Path(args.ckpt) / "policy.pth")
-            policy.load_state_dict(state_dict)
-        except:
-            print("checking args.ckpt, but no checkpoint provided")
-
-        policy.to(self.device)
-        self.game = get_game(args)
-        self.mcts = get_agent(args, policy, self.game).mcts
-
-        # controls the endless searching loop
-        self.stop_search = False
-
-    def ready(self):
-        return True
-    
-    def endless_tree_search(self, canonical_board):
-        self.stop_search = False
-        self.search_stopped = False
-        while not self.stop_search:
-            self.mcts.tree_search(canonical_board)
-        self.search_stopped = True
-
-    def stop_tree_search(self):
-        self.stop_search = True
-        while not self.search_stopped:
-            continue
-        return True
-
-    def move(self, board):
-        canonical_board = self.game.get_canonical_form(board, self.player_id)
-        self.stop_tree_search()
-
-        # perform tree search again
-        for _ in range(self.mcts.num_tree_search):
-            self.mcts.tree_search(canonical_board)
-
-        action_id = np.argmax(self.mcts.action_probs(canonical_board, temperature=0))
-
-        board, next_player_id = self.game.get_next_state(board, self.player_id, action_id)
-        canonical_board = self.game.get_canonical_form(board, next_player_id)
-
-
-        return action_id

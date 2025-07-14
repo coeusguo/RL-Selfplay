@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 from typing import Tuple
 
-NUM_CHANNELS = [512, 512]
+NUM_CHANNELS = [512, 512, 512]
 HEAD_DIM = 64
 
 class ResidualBlock(nn.Module):

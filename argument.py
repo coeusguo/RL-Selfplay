@@ -56,6 +56,7 @@ def parse_args():
     # logging
     parser.add_argument("-log-dir", type=str, default="log")
     parser.add_argument("-save-every", type=int, default=10, help="how many epochs per evluate")
+    parser.add_argument("-pve", action="store_true", help="will not create log folder in pve mode")
 
     # checkpointing
     parser.add_argument("-resume", action="store_true",  
@@ -67,6 +68,8 @@ def parse_args():
     # make unique log dir by time
     args.log_dir = Path(args.log_dir) / \
         f"{args.agent}_{args.game}_{args.board_size}x{args.board_size}_{datetime.datetime.now()}".replace(" ", "-")
-    os.makedirs(args.log_dir, exist_ok=True)
+    
+    if not args.pve:
+        os.makedirs(args.log_dir, exist_ok=True)
 
     return args

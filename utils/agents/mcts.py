@@ -165,8 +165,8 @@ class MCTSAgent(Agent):
         self.decay_step = args.temp_decay_step
         self.decay_rate = args.temp_decay_rate
 
-    def init_buffer(self, num_visits_only = False):
-        self.mcts.clear_search_tree(num_visits_only)
+    def init_buffer(self):
+        self.mcts.clear_search_tree()
 
     def run_one_episode(self, non_draw = False) -> list[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
         self.policy.eval()
@@ -178,7 +178,6 @@ class MCTSAgent(Agent):
         player_id = 1
         init_player_id = player_id
         board = self.game.get_empty_board()
-        self.init_buffer(num_visits_only=True)
 
         temp = self.temperature
         decayed = False

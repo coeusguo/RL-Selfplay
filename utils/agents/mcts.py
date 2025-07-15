@@ -127,14 +127,23 @@ class MCTS:
         # return the state value of child node of (s), by taking the best action
         return -opponent_v
 
-    def action_probs(self, canonical_board: np.ndarray, temperature: float = 1.0) -> np.ndarray:
+    def action_probs(self, 
+        canonical_board: np.ndarray, 
+        temperature: float = 1.0, 
+        do_search: bool = True 
+    ) -> np.ndarray:
+        '''
+            if do_search = False, make sure the input board has beed searched before,
+            ususally set to False when need to collect soft probs during evluation, for training
+        '''
         
         s = canonical_board.tobytes()
 
         # perform tree search
-        for i in range(self.num_tree_search):
-            self.num = 0
-            self.tree_search(canonical_board)
+        if do_search:
+            for i in range(self.num_tree_search):
+                self.num = 0
+                self.tree_search(canonical_board)
 
         if temperature == 0:# deterministic
             # in case of multiple (s, a) pairs have same visiting frequency
@@ -156,8 +165,8 @@ class MCTS:
 
 class MCTSAgent(Agent):
     def __init__(self, args, policy, game):
-        self.game = game
-        self.policy = policy
+        super(MCTSAgent, self).__init__(args, policy, game)
+
         self.mcts = MCTS(args, game, policy)
         self.temperature = args.temperature
 
@@ -167,143 +176,12 @@ class MCTSAgent(Agent):
     def init_buffer(self):
         self.mcts.clear_search_tree()
 
-    def run_one_episode(self, non_draw = False) -> list[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
-        self.policy.eval()
-
-        # sample buffers
-        raw_canonical_boards = []
-        action_ids = []
-
-        player_id = 1
-        init_player_id = player_id
-        board = self.game.get_empty_board()
-
-        temp = self.temperature
-        decayed = False
-        step = 0
-        while True:
-            step += 1
-            canonical_board = self.game.get_canonical_form(board, player_id)
-
-            # decay the temperature if needed
-            if step >= self.decay_step and not decayed:
-                temp = temp * self.decay_rate
-                decayed = True
-
-            pi = self.mcts.action_probs(canonical_board, temperature=temp)
-
-            # randomly sample an action from categorical distribution
-            action_id = np.random.choice(np.arange(len(pi)), p=pi).item()
-
-            # save samples
-            raw_canonical_boards.append(canonical_board)
-            action_ids.append(action_id)
-
-            # get updated board and opponent's id
-            board, player_id = self.game.get_next_state(board, player_id, action_id)
-            
-            # check terminal condition
-            reward = self.game.is_terminal(board, init_player_id)
-            if non_draw and reward == 0:
-                # draw, but requires non-draw game, restart the game
-                board = self.game.get_empty_board()
-                raw_canonical_boards = []
-                action_ids = []
-                player_id = init_player_id
-                continue
-
-            if reward is not None:
-                # print(self.game.get_readable_board(board))
-                # print(f"{reward=}")
-                break
-
-        return self.pack_samples([raw_canonical_boards], [action_ids], [reward], [init_player_id])[0]
-
-    def pack_samples(self, 
-            canonical_boards: list[list[np.ndarray]], 
-            action_ids: list[list[int]], 
-            rewards: list[int], 
-            init_player_ids: list[int]
-        ):
-
-        '''
-        accept a batch of episodes
-
-        post process samples,
-        case:
-            - reward = 1, init_player win, opponent lose
-            - reward = -1, init_player lose, oppenent win
-            - reward = 0, draw
-
-        therefore, if:
-            init_player_id = 1:
-                reward = reward
-            init_player_id = -1:
-                reward = -reward
-
-            reward = reward * player_id
-
-        return 
-        [ # episodes
-            [ # 8 directions * episode_lengths
-                (board, pi, reward), ...
-            ]
-        ] 
-        '''
-        assert len(canonical_boards) == len(action_ids) == len(rewards) == len(init_player_ids)
-
-        episode_lengths = []
-        _boards, _action_ids, _player_ids, _rewards = [], [], [], []
-        for idx in range(len(action_ids)):
-            # note length for each episode
-            elength = len(action_ids[idx])
-            episode_lengths.append(elength)
-
-            _boards.append(np.stack(canonical_boards[idx])) # [(b1, n, n), (b2, n, n), ...]
-            _action_ids.append(np.array(action_ids[idx], dtype=np.int64)) # (B,)
-
-            player_ids = np.ones(elength, dtype=np.int64) * init_player_ids[idx]
-            player_ids[1::2] = - init_player_ids[idx]
-            _player_ids.append(player_ids)
-
-            _rewards.append(np.ones(elength, dtype=np.int64) * rewards[idx])
-        
-        # B = b1 + b2 + ... + b_n, where b_i is the length of i-th episode
-        boards = np.concatenate(_boards, axis=0) #(B, N, N)
-        action_ids = np.concatenate(_action_ids, axis=0) #(B,)
-        player_ids = np.concatenate(_player_ids, axis=0) #(B,)
-        rewards = np.concatenate(_rewards, axis=0) #(B,)
-
-        boards = torch.from_numpy(boards).float()
-        action_ids = torch.from_numpy(action_ids)
-        if torch.cuda.is_available():
-            boards = boards.cuda()
-            action_ids = action_ids.cuda()
-
-        # do some data augmentation
-        onehot_actions = F.one_hot(action_ids, num_classes=self.game.get_action_size()) # (B, N*N)
-        augmented_samples = self.game.get_symmetries(boards, onehot_actions) # (8, B, N*N)
-
-        break_points = np.cumsum(episode_lengths)[:-1]
-        group_rewards = rewards * player_ids
-        group_rewards = list(np.split(group_rewards, break_points))
-        group_rewards = [list(rewards) for rewards in group_rewards] 
-
-        samples = [[] for _ in range(len(episode_lengths))]
-
-        for (board, pi) in augmented_samples:
-            board = board.cpu().numpy()
-            pi = pi.cpu().numpy()
-
-            board = list(np.split(board, break_points))
-            pi = list(np.split(pi, break_points))
-
-            for idx in range(len(board)):
-
-                board_ls, pi_ls = list(board[idx]), list(pi[idx])
-                samples[idx].extend(list(zip(board_ls, pi_ls, group_rewards[idx])))
-
-        return samples
+    def action_probs(self,
+        canonical_board: np.ndarray, 
+        temperature: float = 1.0, 
+        do_search: bool = True 
+    ):
+        return self.mcts.action_probs(canonical_board, temperature=temperature, do_search=do_search)
 
 
 class AyncMCTSOpponent(MCTSAgent):

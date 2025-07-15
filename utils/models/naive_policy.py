@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 from typing import Tuple
 
-NUM_CHANNELS = [128, 512, 512]
+NUM_CHANNELS = [64, 128, 128, 256, 256, 512]
 HEAD_DIM = 64
 
 class ResidualBlock(nn.Module):
@@ -24,14 +24,14 @@ class ResidualBlock(nn.Module):
 
     def forward(self, x):
         out = F.relu(self.bn1(self.conv1(x)))
-        out = F.relu(self.bn2(self.conv2(out)))
-        return out + self.shortcut(x)
+        out = self.bn2(self.conv2(out))
+        return F.relu(out + self.shortcut(x))
 
 
 class AttentionPool(nn.Module):
     def __init__(self, in_channel, dropout=0.1):
         super().__init__()
-        self.query = nn.Parameter(torch.randn(1, in_channel))
+        self.query = nn.Parameter(torch.randn(1, 1, in_channel))
 
         self.attn = nn.MultiheadAttention(
                         embed_dim=in_channel,
@@ -45,12 +45,9 @@ class AttentionPool(nn.Module):
     def forward(self, x):
         B, C, H, W = x.size()
         x = x.reshape(B, C, H * W).transpose(1, 2) # (B, HW, C)
-        query = self.query.expand(B, 1, C) 
-
-        q = torch.cat([x, query], dim=1)
-        out, _ = self.attn(query=q, key=x, value=x)
-
-        return self.norm(out[:, -1, :])
+        query = self.query.expand(B, -1, -1)
+        out, _ = self.attn(query=query, key=x, value=x)
+        return self.norm(out.squeeze(1))
 
 
 class NaivePolicyNet(nn.Module):
@@ -68,17 +65,10 @@ class NaivePolicyNet(nn.Module):
             for i in range(len(NUM_CHANNELS) - 1)
         ])
 
-        self.fc = nn.Sequential(
-            nn.Linear(NUM_CHANNELS[-1], NUM_CHANNELS[-1]),
-            nn.LayerNorm(NUM_CHANNELS[-1]),
-            nn.ReLU(),
-            nn.Dropout(p=self.dropout)
-        )
-
         self.pi_fc = nn.Linear(NUM_CHANNELS[-1], self.action_size)
         self.v_fc = nn.Linear(NUM_CHANNELS[-1], 1)
 
-        self.gap = AttentionPool(NUM_CHANNELS[-1])
+        self.gap = AttentionPool(NUM_CHANNELS[-1], dropout=self.dropout)
 
     def forward(self, s):
         B = s.size(0)
@@ -86,10 +76,13 @@ class NaivePolicyNet(nn.Module):
         out = self.block(out)
 
         out = self.gap(out)
-        out = self.fc(out)
 
         pi_logits = self.pi_fc(out)
         v_logits = self.v_fc(out).view(B) # reshape (B, 1) to (B, )
 
+        # output = {
+        #     "log_probs": F.log_softmax(pi_logits, dim=-1),
+        #     "values": torch.tanh(v_logits)
+        # }
         return F.log_softmax(pi_logits, dim=-1), torch.tanh(v_logits)
     

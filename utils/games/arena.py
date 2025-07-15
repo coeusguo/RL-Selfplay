@@ -31,7 +31,8 @@ class Arena:
 
             # save samples if needed
             if keep_samples:
-                raw_samples.append((canonical_board, action_id))
+                action_probs = cur_player.action_probs(canonical_board, do_search=False)
+                raw_samples.append((canonical_board, action_probs))
             board, player_id = game.get_next_state(board, player_id, action_id)
 
             # check user winning condition

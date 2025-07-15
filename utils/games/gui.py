@@ -98,7 +98,7 @@ class GUI:
                 self.is_bot_turn = True
                 self.status_label.config(text="AI's Turn (White)")
                 # Use 'after' to give a small delay for a more natural feel
-                self.root.after(500, self.bot_turn)
+                self.root.after(100, self.bot_turn)
 
     def bot_turn(self):
         if self.game_over:

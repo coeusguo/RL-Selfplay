@@ -1,0 +1,19 @@
+python ray_train.py \
+    -rollout-actor mcts_ray \
+    -trainer- mcts_ray \
+    -lr 1e-3 \
+    -main-epoch 4000 \
+    -num-tree-search 400 \
+    -rollout-num-tree-search 600 \
+    -trainer-data-buffer-size 50 \
+    -rollout-buffer-size 8 \
+    -board-size 9 \
+    -num-in-a-row 5 \
+    -batch-size 64 \
+    -num-mini-epoch 1 \
+    -eval-every 10 \
+    -save-every 10 \
+    -num-eval-matches 5 \
+    -temp-decay-step 35 \
+    -temp-decay-rate 0.1 \
+    -update-threshold 0.7

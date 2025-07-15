@@ -1,43 +1,32 @@
 import os
-import ray
-import torch
+import abc
 import random
+import torch
 import numpy as np
 from tqdm import tqdm
 from collections import deque, OrderedDict
-from typing import Literal, Tuple
+from typing import Tuple
 from pathlib import Path, PosixPath
-from .optimizer import get_optimizer
-from .models import get_wrapped_policy
-from .losses import get_loss
-from .games import get_game
-from .agents import get_agent
-from .games.arena import Arena
+from collections import defaultdict
+from utils.optimizer import get_optimizer
+from utils.models import get_wrapped_policy
+from utils.losses import get_loss
+from utils.games import get_game
+from utils.agents import get_agent
+from utils.games.arena import Arena
 
-@ray.remote(num_gpus=1)
-class SelfPlayActor:
+
+class BaseSelfPlayActor:
     def __init__(self, args):
         self.temp = args.temperature
 
         self.policy = get_wrapped_policy(args)
+        self.policy.to(self.device)
+
         self.game = get_game(args)
         self.agent = get_agent(args, self.policy, self.game)
 
-        # setup ray gpu environment
-        gpu_ids = ray.get_gpu_ids()
-        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, gpu_ids))
-        self.device = torch.device("cuda:0")
-
-        self.policy.to(self.device)
-
-        print(f"doubled search depth to {args.num_tree_search * 2}!")
-        self.agent.mcts.num_tree_search = args.num_tree_search * 2
-
-    def ready(self):
-        return True
-
     def generate_one_episode(self, non_draw = False) -> list[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
-        self.agent.init_buffer()
         return self.agent.run_one_episode(non_draw=non_draw)
         
     def load_checkpoint(self, state_dict: OrderedDict):
@@ -46,12 +35,8 @@ class SelfPlayActor:
         # the policy has been updated, should clear old buffers (if any)
         self.agent.init_buffer()
 
-    def get_checkpoint(self):
-        return self.policy.state_dict()
 
-
-@ray.remote(num_gpus=1)
-class Trainer:
+class BaseTrainer:
     def __init__(self, args):
         self.args = args
         
@@ -62,6 +47,7 @@ class Trainer:
 
         # initialize policy model
         self.policy = get_wrapped_policy(args)
+        self.policy.to(self.device)
         if args.ckpt is not None:
             self.load_checkpoint(args.ckpt)
 
@@ -75,56 +61,16 @@ class Trainer:
         # get loss function
         self.loss_fn = get_loss(args)
 
-        # setup ray gpu environment
-        gpu_ids = ray.get_gpu_ids()
-        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, gpu_ids))
-        self.device = torch.device("cuda:0")
+        # maintain a old policy for evaluation
+        self.old_policy = get_wrapped_policy(self.args)
+        self.old_policy.to(self.device)
+        self.old_agent = get_agent(self.args, self.old_policy, self.game)
+        self.update_old_policy()
 
-        self.policy.to(self.device)
-
-        # will store old policy
-        self.old_agent = None
-        
-    def ready(self):
-        return True
-
-    def train_one_epoch(self):
-        self.policy.train()
-
-        def np_to_tensor(array: list[np.ndarray]) -> torch.Tensor:
-            array = np.array(array)
-            array = torch.tensor(array, dtype=torch.float32)
-            return array.to(self.device)
-        
-        all_samples = []
-        for episode in self.sample_buffer:
-            all_samples.extend(episode)
-
-        num_batches = len(all_samples) // self.batch_size
-        assert num_batches > 0, f"too few training samples, only {len(all_samples)}"
-
-        total_loss = 0
-        for e in range(self.num_mini_epoch):
-            # shuffle the training sample
-            random.shuffle(all_samples)
-
-            for idx in range(num_batches):
-                start_idx = idx * self.batch_size
-                end_idx = (idx + 1) * self.batch_size
-
-                boards, target_pi, target_v = list(zip(*all_samples[start_idx: end_idx]))
-                boards, target_pi, target_v = np_to_tensor(boards), np_to_tensor(target_pi), np_to_tensor(target_v)
-
-                log_pi, v = self.policy(boards)
-                loss = self.loss_fn(log_pi, v, target_pi, target_v)
-
-                total_loss += loss.detach().cpu().item()
-
-                self.optimizer.zero_grad()
-                loss.backward()
-                self.optimizer.step()
-
-        return total_loss / self.num_mini_epoch / num_batches
+    def np_to_tensor(self, array: list[np.ndarray]) -> torch.Tensor:
+        array = np.array(array)
+        array = torch.tensor(array, dtype=torch.float32)
+        return array.to(self.device)
 
     def save_checkpoint(self, save_dir: PosixPath | str):
 
@@ -162,24 +108,18 @@ class Trainer:
             self.sample_buffer.popleft()
         self.sample_buffer.append(episode)
 
-    def match_one_round(self, 
-        old_policy_ckpt: OrderedDict | None = None, 
-        clear_cache_after_eval: bool = False
-    ):
-        if old_policy_ckpt is not None:
-            if self.old_agent is None:
-                self.old_policy = get_wrapped_policy(self.args)
-                self.old_policy.to(self.device)
-                self.old_agent = get_agent(self.args, self.old_policy, self.game)
+    def update_old_policy(self):
+        state_dict = self.policy.state_dict()
+        self.old_policy.load_state_dict(state_dict)
 
-            self.old_policy.load_state_dict(old_policy_ckpt)
+    def match_one_round(self, clear_cache_after_eval: bool = False):
 
         self.old_policy.eval()
         self.policy.eval()
 
         num_win, num_lose, num_draw, raw_samples = Arena.multiple_matches(
-            self.agent.mcts,
-            self.old_agent.mcts,
+            self.agent,
+            self.old_agent,
             self.game,
             num_match=2,
             use_tqdm=False,
@@ -217,3 +157,94 @@ class Trainer:
             self.old_agent.init_buffer()
 
         return num_win, num_lose, num_draw
+
+    @abc.abstractmethod
+    def train_one_epoch(self):
+        pass
+
+
+class MCTSSelfPlayActor(BaseSelfPlayActor):
+    def __init__(self, args):
+        super(MCTSSelfPlayActor, self).__init__(args)
+
+        print(f"set the rollout search depth to {int(args.rollout_num_tree_search)}!")
+        self.agent.mcts.num_tree_search = int(args.rollout_num_tree_search)
+
+
+class MCTSTrainer(BaseTrainer):
+    def __init__(self, args):
+        super(MCTSTrainer, self).__init__(args)
+
+    def train_one_epoch(self):
+        self.policy.train()
+        
+        all_samples = []
+        for episode in self.sample_buffer:
+            all_samples.extend(episode)
+
+        num_batches = len(all_samples) // self.batch_size
+        assert num_batches > 0, f"too few training samples, only {len(all_samples)}"
+
+        # shuffle the training sample
+        random.shuffle(all_samples)
+        
+        print_dict = defaultdict(float)
+        for e in range(self.num_mini_epoch):
+            for idx in range(num_batches):
+                start_idx = idx * self.batch_size
+                end_idx = (idx + 1) * self.batch_size
+
+                boards, target_pi, target_v = list(zip(*all_samples[start_idx: end_idx]))
+
+                # convert to cuda tensor
+                boards = self.np_to_tensor(boards) 
+                target_pi = self.np_to_tensor(target_pi)
+                target_v = self.np_to_tensor(target_v)
+
+                log_pi, v = self.policy(boards)
+                loss = self.loss_fn(log_pi, v, target_pi, target_v)
+
+                for k, v in loss.items():
+                    print_dict[k] += v.detach().cpu().item()
+
+                self.optimizer.zero_grad()
+                loss["loss"].backward()
+                self.optimizer.step()
+
+        return {
+            k: f"{v / self.num_mini_epoch / num_batches:.3f}" for k, v in print_dict.items()
+        }
+
+
+class PPOTrainer(BaseTrainer):
+    def __init__(self, args):
+        super(PPOTrainer, self).__init__(args)
+
+    def train_one_epoch(self, num_epoch: int | None = None):
+        self.policy.train()
+
+        print_dict = defaultdict(float)
+        for _ in range(self.num_mini_epoch):
+            for episode in self.sample_buffer:
+                boards, old_pi, target_v = list(zip(*episode))
+
+                # convert to cuda tensor
+                boards = self.np_to_tensor(boards) 
+                old_pi = self.np_to_tensor(old_pi)
+                target_v = self.np_to_tensor(target_v)
+
+                log_pi, v = self.policy(boards)
+                loss_dict = self.loss_fn(self.args, log_pi, old_pi, v, target_v)
+                loss = loss_dict.pop("loss")
+
+                for k, v in loss.items():
+                    print_dict[k] += v.detach().cpu().item()
+
+                self.optimizer.zero_grad()
+                loss["loss"].backward()
+                self.optimizer.step()
+
+        return {
+            k: f"{v / self.num_mini_epoch / num_batches:.3f}" for k, v in print_dict.items()
+        }
+        

@@ -32,6 +32,8 @@ def parse_args():
     # ray related
     parser.add_argument("-rollout-sample-buffer-size", type=int, default=5, 
                     help="maximum number of rollout refs to store in the buffer")
+    parser.add_argument('-rollout-actor', type=str, default="mcts_ray")
+    parser.add_argument('-trainer', type=str, default="mcts_ray")
 
     # self play related
     parser.add_argument("-temperature", type=float, default=1.0)
@@ -51,6 +53,9 @@ def parse_args():
     parser.add_argument("-puct-factor", type=float, default=1.0)
     parser.add_argument("-num-tree-search", type=int, default=50, 
                          help="the number of tree searches per prediction")
+    parser.add_argument("-rollout-num-tree-search", type=int, default=50, 
+                        help="number of tree search for each turn during rollout, generally higher than num_tree_search")
+
 
     # policy model related
     parser.add_argument("-model", type=str, default="naive")
@@ -72,6 +77,9 @@ def parse_args():
     args.log_dir = Path(args.log_dir) / \
         f"{args.agent}_{args.game}_{args.board_size}x{args.board_size}_{datetime.datetime.now()}".replace(" ", "-")
     
+    if not args.reuse_eval_sample and args.rollout_num_tree_search <= args.num_tree_search:
+        print("since you are using equal or fewer number of rollout tree search, recommend turning on reuse_eval_sample")
+
     if not args.pve:
         os.makedirs(args.log_dir, exist_ok=True)
 

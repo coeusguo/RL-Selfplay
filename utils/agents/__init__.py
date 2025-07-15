@@ -1,10 +1,16 @@
 from .mcts import MCTSAgent, AyncMCTSOpponent
+from .ppo import PPOAgent
 
 def get_agent(args, policy, game):
     if args.agent.lower() == "mcts":
         return MCTSAgent(args, policy, game)
+    
+    elif args.agent.lower() == "ppo":
+        return PPOAgent(args, policy, game)
+
     elif args.agent.lower() == "aync_mcts_opponent":
         return AyncMCTSOpponent(args, policy, game)
+
     else:
         raise NotImplementedError(f"agent: {args.agent} not implemented")
 
